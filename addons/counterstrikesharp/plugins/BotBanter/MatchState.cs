@@ -67,12 +67,17 @@ public sealed class MatchState
         _maxDeficitCt = 0;
         HumanTeamLossStreak = 0;
         HumanTeam = CsTeam.None;
-        ResetRound(0);
+        ResetRoundState(0);
     }
 
     public void ResetRound(double now)
     {
         Round++;
+        ResetRoundState(now);
+    }
+
+    private void ResetRoundState(double now)
+    {
         RoundStartTime = now;
         FirstKillDone = false;
         KillWindow.Clear();

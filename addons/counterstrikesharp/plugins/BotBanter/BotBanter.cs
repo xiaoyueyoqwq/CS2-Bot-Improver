@@ -1,6 +1,7 @@
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes;
+using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Utils;
@@ -11,11 +12,12 @@ namespace BotBanter;
 public sealed class BotBanterPlugin : BasePlugin
 {
     public override string ModuleName => "BotBanter";
-    public override string ModuleVersion => "1.0.0";
+    public override string ModuleVersion => "1.1.0";
     public override string ModuleAuthor => "Devin";
     public override string ModuleDescription => "Bots talk trash like real people: highlight-aware, persona-driven, grudge-keeping banter.";
 
     private bool _enabled = true;
+    private int _mapEpoch;
 
     private Lexicon _lexicon = new();
     private PersonaAssigner _personas = null!;
@@ -75,6 +77,7 @@ public sealed class BotBanterPlugin : BasePlugin
 
     private void ResetMap()
     {
+        _mapEpoch++;
         _state.ResetMap();
         _budget.ResetMap();
         _grudges.ResetMap();
@@ -90,6 +93,12 @@ public sealed class BotBanterPlugin : BasePlugin
 
     private void OnBanterCommand(CCSPlayerController? caller, CommandInfo command)
     {
+        if (!HasCommandAccess(caller))
+        {
+            command.ReplyToCommand("[BotBanter] no permission.");
+            return;
+        }
+
         if (command.ArgCount > 1)
         {
             var arg = command.GetArg(1);
@@ -107,6 +116,12 @@ public sealed class BotBanterPlugin : BasePlugin
 
     private void OnFreqCommand(CCSPlayerController? caller, CommandInfo command)
     {
+        if (!HasCommandAccess(caller))
+        {
+            command.ReplyToCommand("[BotBanter] no permission.");
+            return;
+        }
+
         if (command.ArgCount > 1)
         {
             var arg = command.GetArg(1);
@@ -132,7 +147,7 @@ public sealed class BotBanterPlugin : BasePlugin
         _grudges.DecayRound();
         DetectHumanTeam();
 
-        if (!_enabled || !_lexicon.Loaded)
+        if (!BanterAllowed)
         {
             return HookResult.Continue;
         }
@@ -269,7 +284,7 @@ public sealed class BotBanterPlugin : BasePlugin
 
         var grudge = _grudges.RecordKill(attacker.PlayerName, victim.PlayerName, _state.Round);
 
-        if (_enabled && _lexicon.Loaded)
+        if (BanterAllowed)
         {
             ReactToKill(attacker, victim, kill, grudge, now);
         }
@@ -393,7 +408,7 @@ public sealed class BotBanterPlugin : BasePlugin
 
     private void HandleTeammateFeed(CCSPlayerController feeder)
     {
-        if (!_enabled || !_lexicon.Loaded)
+        if (!BanterAllowed)
         {
             return;
         }
@@ -417,7 +432,7 @@ public sealed class BotBanterPlugin : BasePlugin
 
     private HookResult OnBombDefused(EventBombDefused @event, GameEventInfo info)
     {
-        if (!_enabled || !_lexicon.Loaded || @event.Userid is not { } defuser || !IsTrackable(defuser))
+        if (!BanterAllowed || @event.Userid is not { } defuser || !IsTrackable(defuser))
         {
             return HookResult.Continue;
         }
@@ -485,7 +500,7 @@ public sealed class BotBanterPlugin : BasePlugin
             && clutchStats.Team == winner && !_state.DeadThisRound.Contains(clutcher))
         {
             clutchStats.ClutchWins++;
-            if (!clutchStats.IsBot && _state.ClutchSize >= 3 && _enabled && _lexicon.Loaded
+            if (!clutchStats.IsBot && _state.ClutchSize >= 3 && BanterAllowed
                 && _budget.TryUseExempt("clutch"))
             {
                 var clutchVars = BaseVars();
@@ -499,10 +514,13 @@ public sealed class BotBanterPlugin : BasePlugin
             }
         }
 
-        var survivors = _state.Stats.Values.Where(s => s.Team != CsTeam.None && !_state.DeadThisRound.Contains(s.Name));
+        var aliveNames = AlivePlayers(CsTeam.Terrorist).Concat(AlivePlayers(CsTeam.CounterTerrorist))
+            .Select(p => p.PlayerName)
+            .ToHashSet();
+        var survivors = _state.Stats.Values.Where(s => aliveNames.Contains(s.Name));
         _state.RecordRoundEnd(winner, survivors);
 
-        if (!_enabled || !_lexicon.Loaded)
+        if (!BanterAllowed)
         {
             return HookResult.Continue;
         }
@@ -577,7 +595,7 @@ public sealed class BotBanterPlugin : BasePlugin
 
     private HookResult OnMatchEnd(EventCsWinPanelMatch @event, GameEventInfo info)
     {
-        if (!_enabled || !_lexicon.Loaded)
+        if (!BanterAllowed)
         {
             return HookResult.Continue;
         }
@@ -597,8 +615,17 @@ public sealed class BotBanterPlugin : BasePlugin
         }
 
         // 颁奖 after a beat so it lands on the win panel.
-        var humans = Utilities.GetPlayers().Where(p => IsTrackable(p) && !p.IsBot).ToList();
-        AddTimer(3.0f, () => AwardsCeremony.Run(_state, _lexicon, humans, _rng));
+        var epoch = _mapEpoch;
+        AddTimer(3.0f, () =>
+        {
+            if (epoch != _mapEpoch || !_enabled)
+            {
+                return;
+            }
+
+            var humans = Utilities.GetPlayers().Where(p => IsTrackable(p) && !p.IsBot).ToList();
+            AwardsCeremony.Run(_state, _lexicon, humans, _rng);
+        });
         return HookResult.Continue;
     }
 
@@ -726,15 +753,16 @@ public sealed class BotBanterPlugin : BasePlugin
 
         Emit(caller.Name, call.Text, "infight_call", countsBudget: false, minDelay: 2.0, maxDelay: 4.0);
         // 高冷回嘴 = 沉默, also part of the bit.
+        var epoch = _mapEpoch;
         var replyDelay = 6.0 + _rng.NextDouble() * 3.0;
         if (reply != null && feederPersona != Persona.Gaoleng)
         {
-            AddTimer((float)replyDelay, () => PrintLine(feeder, reply.Text, "infight_reply"));
+            AddTimer((float)replyDelay, () => PrintLine(feeder, reply.Text, "infight_reply", epoch));
         }
 
         if (calm != null)
         {
-            AddTimer((float)(replyDelay + 4.0 + _rng.NextDouble() * 3.0), () => PrintLine(calmer.Name, calm.Text, "infight_calm"));
+            AddTimer((float)(replyDelay + 4.0 + _rng.NextDouble() * 3.0), () => PrintLine(calmer.Name, calm.Text, "infight_calm", epoch));
         }
     }
 
@@ -742,7 +770,7 @@ public sealed class BotBanterPlugin : BasePlugin
 
     private bool TrySpeakBudgeted(CCSPlayerController? bot, string scenario, Dictionary<string, string> vars, int score, bool redHot = false)
     {
-        if (bot == null || !bot.IsBot || !_enabled || !_lexicon.Loaded)
+        if (bot == null || !bot.IsBot || !BanterAllowed)
         {
             return false;
         }
@@ -790,11 +818,18 @@ public sealed class BotBanterPlugin : BasePlugin
             : _budget.Delay(text);
 
         _budget.RecordSpoken(botName, Now(), countsBudget);
-        AddTimer((float)delay, () => PrintLine(botName, text, scenario));
+        var epoch = _mapEpoch;
+        AddTimer((float)delay, () => PrintLine(botName, text, scenario, epoch));
     }
 
-    private void PrintLine(string botName, string text, string scenario)
+    private void PrintLine(string botName, string text, string scenario, int epoch)
     {
+        // Delayed sends revalidate: map unchanged, plugin still on, bot still on the server.
+        if (epoch != _mapEpoch || !_enabled || FindPlayer(botName) == null)
+        {
+            return;
+        }
+
         Server.PrintToChatAll($" {botName}: {text}");
         _chains.LogSaid(botName, _state.Round, scenario, text, $"{_state.ScoreT}:{_state.ScoreCt}");
         if (_state.Stats.TryGetValue(botName, out var stats))
@@ -949,6 +984,19 @@ public sealed class BotBanterPlugin : BasePlugin
 
     private static CsTeam Opposite(CsTeam team) =>
         team == CsTeam.Terrorist ? CsTeam.CounterTerrorist : CsTeam.Terrorist;
+
+    private bool BanterAllowed => _enabled && _lexicon.Loaded && !IsWarmup() && !IsDeathmatch();
+
+    private static bool IsWarmup() =>
+        Utilities.FindAllEntitiesByDesignerName<CCSGameRulesProxy>("cs_gamerules")
+            .FirstOrDefault()?.GameRules?.WarmupPeriod ?? false;
+
+    private static bool IsDeathmatch() =>
+        (ConVar.Find("game_type")?.GetPrimitiveValue<int>() ?? 0) == 1
+        && (ConVar.Find("game_mode")?.GetPrimitiveValue<int>() ?? 0) == 2;
+
+    private static bool HasCommandAccess(CCSPlayerController? caller) =>
+        caller == null || AdminManager.PlayerHasPermissions(caller, "@css/generic");
 
     private static bool IsTrackable(CCSPlayerController? player) =>
         player is { IsValid: true, IsHLTV: false }

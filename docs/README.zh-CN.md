@@ -76,7 +76,11 @@ CS2-Bot-Improver 面向喜欢与人机博弈，或想和朋友一起挑战人机
 
 ## BotChat 状态
 
-`BotChat` 插件支持 YAML 本地化消息池和可配置的消息概率。当前已在
+`BotChat` 插件支持 YAML 本地化消息池和可配置的消息概率。同时内置垃圾话
+层（`Banter` 配置节，`botchat_banter_enabled`）：BOT 以 SteamID 记恩怨、
+连续死于同一人后红温、复仇成功会开麦、根据真实击杀上下文评分的名场面会
+引来围观吹捧、击杀后会嘲讽对方并允许至多一次回嘴接龙。台词位于
+`lang/*.yml` 的 `banter.*` 池。当前已在
 BotHider `identity_mode: player` 的服务器配置下验证广播消息可见。
 
 BotHider `identity_mode: bot` 仍存在未解决的发送限制：通过 fake-client

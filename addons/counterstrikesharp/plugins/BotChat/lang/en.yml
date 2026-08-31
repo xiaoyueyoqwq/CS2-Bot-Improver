@@ -62,3 +62,47 @@ thanks:
   - life game
   - luck
   - ":)"
+
+# Banter pools. {other} = the other party in the exchange, {self} = speaker.
+banter:
+  highlight:
+    - what a shot
+    - "{other} is smurfing lol"
+    - clip that
+    - insane
+    - that was actually nuts
+    - pro server is that way
+    - ok that was clean
+    - HLTV top 10 incoming
+
+  revenge:
+    - "FINALLY. get rekt {other}"
+    - told you I'd get you back
+    - revenge is sweet
+    - we're even now
+    - "{other} how the tables turn"
+
+  red_hot:
+    - "you again?? ok I'm remembering this {other}"
+    - stop killing me man
+    - "everyone leave {other} alone, he's MINE"
+    - I'm counting every one of these
+    - not funny anymore
+
+  enemy_taunt:
+    - too easy
+    - "stop peeking there {other}"
+    - I know all your spots
+    - free kill delivery, right on time
+    - "{other} you keep walking into my crosshair"
+    - do you even hear footsteps
+    - guess why I was waiting there
+
+  response:
+    - "?"
+    - "???"
+    - lucky shot, nothing more
+    - keep talking, see what happens
+    - camping isn't skill
+    - my bad, lagged
+    - "{other} just wait for next round"

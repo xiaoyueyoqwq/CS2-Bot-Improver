@@ -7,6 +7,7 @@
 //   botchat_halftime_enabled     - halftime messages (default 1)
 //   botchat_end_enabled          - goodbyes and taunts at match end (default 1)
 //   botchat_killreactions_enabled - kill reactions (ns / thanks) (default 1)
+//   botchat_banter_enabled       - grudge/persona banter reactions (default 1)
 
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
@@ -21,7 +22,7 @@ namespace BotChat;
 public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
 {
     public override string ModuleName => "BotChat";
-    public override string ModuleVersion => "1.2.3";
+    public override string ModuleVersion => "1.3.0";
     public override string ModuleAuthor => "Fimall";
     public override string ModuleDescription =>
         "Bots greet at match start, say gg at match end, and chat about kills";
@@ -41,6 +42,11 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     private (string message, int weight)[] _blindKillMessages = [];
     private (string message, int weight)[] _airborneKillMessages = [];
     private (string message, int weight)[] _thanksMessages = [];
+    private (string message, int weight)[] _banterHighlightMessages = [];
+    private (string message, int weight)[] _banterRevengeMessages = [];
+    private (string message, int weight)[] _banterRedHotMessages = [];
+    private (string message, int weight)[] _banterEnemyTauntMessages = [];
+    private (string message, int weight)[] _banterResponseMessages = [];
 
     private const int AbsoluteMaxSpeakersPerTeam = 5;
 
@@ -64,11 +70,20 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     private bool _startGreetingDone;
     private bool _startGreetingScheduled;
 
+    // Banter state: map-scoped grudge memory and persona casting, plus the
+    // per-round budget and per-bot cooldowns that keep chatter human-paced.
+    private readonly GrudgeGraph _grudges = new();
+    private readonly PersonaAssigner _personas = new();
+    private readonly Dictionary<ulong, double> _banterCooldownUntil = new();
+    private readonly Dictionary<ulong, List<double>> _recentKillTimes = new();
+    private int _banterThisRound;
+
     public FakeConVar<bool> Enabled = new("botchat_enabled", "Enable bot chat messages", true);
     public FakeConVar<bool> StartEnabled = new("botchat_start_enabled", "Bots greet at match start", true);
     public FakeConVar<bool> HalfTimeEnabled = new("botchat_halftime_enabled", "Bots chat at halftime", true);
     public FakeConVar<bool> EndEnabled = new("botchat_end_enabled", "Bots say goodbye at match end", true);
     public FakeConVar<bool> KillReactionsEnabled = new("botchat_killreactions_enabled", "Bots react to kills (ns / thanks)", true);
+    public FakeConVar<bool> BanterEnabled = new("botchat_banter_enabled", "Bots hold grudges, take revenge and talk trash", true);
 
     public void OnConfigParsed(BotChatConfig config)
     {
@@ -77,6 +92,8 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         Config.Chat.Normalize();
         Config.Taunts ??= new BotChatTauntConfig();
         Config.Taunts.Normalize();
+        Config.Banter ??= new BotChatBanterConfig();
+        Config.Banter.Normalize();
     }
 
     public override void Load(bool hotReload)
@@ -87,6 +104,11 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             _endSaid = false;
             _startGreetingDone = false;
             _startGreetingScheduled = false;
+            _grudges.ResetMap();
+            _personas.Reset();
+            _banterCooldownUntil.Clear();
+            _recentKillTimes.Clear();
+            _banterThisRound = 0;
         });
         RegisterEventHandler<EventBeginNewMatch>(OnBeginNewMatch);
         RegisterEventHandler<EventTeamIntroStart>(OnTeamIntroStart);
@@ -142,6 +164,9 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
 
     private HookResult OnStartHalftime(EventStartHalftime @event, GameEventInfo info)
     {
+        // Tilt does not survive the side switch.
+        _grudges.ResetHalf();
+
         if (IsDeathmatch() || !Enabled.Value || !HalfTimeEnabled.Value)
             return HookResult.Continue;
 
@@ -340,6 +365,9 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     private HookResult OnRoundStart(EventRoundStart @event, GameEventInfo info)
     {
         _owedThanks.Clear();
+        _banterThisRound = 0;
+        _recentKillTimes.Clear();
+        _grudges.DecayRound();
         if (!_startGreetingDone && !_startGreetingScheduled
             && !IsDeathmatch() && Enabled.Value && StartEnabled.Value
             && !IsWarmupPeriod())
@@ -396,18 +424,32 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             $"headshot={@event.Headshot} blind={@event.Attackerblind} smoke={@event.Thrusmoke} " +
             $"wall={@event.Penetrated} air={@event.Attackerinair}");
 
-        if (IsDeathmatch() || !Enabled.Value || !KillReactionsEnabled.Value)
+        if (IsDeathmatch() || !Enabled.Value)
             return HookResult.Continue;
 
-        if (victim == null || !victim.IsValid || !victim.IsBot || victim.IsHLTV)
+        if (victim == null || !victim.IsValid || victim.IsHLTV)
             return HookResult.Continue;
 
         if (attacker == null || !attacker.IsValid || attacker.IsHLTV
-            || attacker.Team == victim.Team)
+            || attacker.Team == victim.Team || attacker.Slot == victim.Slot)
             return HookResult.Continue;
 
+        bool victimSpoke = false;
+        if (KillReactionsEnabled.Value && victim.IsBot)
+            victimSpoke = HandleKillReactions(@event, victim, attacker);
+
+        HandleBanterOnDeath(@event, victim, attacker, victimSpoke);
+        return HookResult.Continue;
+    }
+
+    // ns / suspicious-kill reactions; returns true when the victim spoke.
+    private bool HandleKillReactions(
+        EventPlayerDeath @event,
+        CCSPlayerController victim,
+        CCSPlayerController attacker)
+    {
         string victimName = victim.PlayerName;
-        string attackerName = attacker != null && attacker.IsValid ? attacker.PlayerName : "world";
+        string attackerName = attacker.PlayerName;
 
         // 1) Victim: react to a kill. Any kill can trigger; headshot raises
         // the chance. Suspicious-context pools are questions, not compliments.
@@ -437,10 +479,8 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         {
             var reaction = PickVictimReaction(@event);
             if (reaction.IsCompliment
-                && attacker != null && attacker.IsValid && attacker.IsBot
-                && !attacker.IsHLTV
-                && !attacker.HasBeenControlledByPlayerThisRound
-                && attacker.Slot != victim.Slot)
+                && attacker.IsBot
+                && !attacker.HasBeenControlledByPlayerThisRound)
             {
                 _owedThanks.Add(attacker.SteamID);
                 Console.WriteLine(
@@ -460,9 +500,212 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             string thanks = PickMessage(_thanksMessages, uniform: true);
             AddTimer(ReactionDelay(), () => BotSay(victim, thanks,
                 () => KillReactionsEnabled.Value));
+            return true;
         }
 
-        return HookResult.Continue;
+        return reactionTriggered;
+    }
+
+    // Grudge-aware banter. Exactly one banter line may fire per death, picked
+    // by priority: revenge > red-hot > highlight praise > enemy taunt. A
+    // taunted bot may fire back once (chain of two at most).
+    private void HandleBanterOnDeath(
+        EventPlayerDeath @event,
+        CCSPlayerController victim,
+        CCSPlayerController attacker,
+        bool victimSpoke)
+    {
+        if (!BanterEnabled.Value || !Config.Banter.Enabled)
+            return;
+
+        ulong attackerId = attacker.SteamID;
+        ulong victimId = victim.SteamID;
+        string attackerName = attacker.PlayerName;
+        string victimName = victim.PlayerName;
+        double now = Server.CurrentTime;
+
+        bool isRevenge = Config.Banter.RevengeEnabled && _grudges.IsRevenge(attackerId, victimId);
+        if (isRevenge)
+            _grudges.ClearRedHot(attackerId, victimId);
+
+        var edge = _grudges.RecordKill(attackerId, victimId);
+        int streak = RecordKillTime(attackerId, now);
+
+        if (_banterThisRound >= Config.Banter.MaxMessagesPerRound)
+            return;
+
+        // 1) Revenge: the attacker was red-hot at this victim and finally
+        // got them back. Red-hot bots never shut up, so no silence gate.
+        if (isRevenge && attacker.IsBot && !attacker.HasBeenControlledByPlayerThisRound
+            && RollPercent(Config.Banter.RevengeChancePercent)
+            && TryBanterSay(attacker, _banterRevengeMessages, victimName, attackerName, now))
+        {
+            Console.WriteLine($"[BotChat] banter revenge: {attackerName} -> {victimName}");
+            return;
+        }
+
+        // 2) Red-hot: the victim has now died to the same tormentor enough
+        // times to tilt. Fires once, at the moment the grudge boils over.
+        if (victim.IsBot && !victim.HasBeenControlledByPlayerThisRound && !victimSpoke
+            && edge.Kills == 3 && _grudges.IsRedHot(victimId, attackerId)
+            && PersonaTraits.SpeaksWhenKilled(_personas.Get(victimId))
+            && RollPercent(Config.Banter.RedHotChancePercent)
+            && TryBanterSay(victim, _banterRedHotMessages, attackerName, victimName, now))
+        {
+            Console.WriteLine($"[BotChat] banter red-hot: {victimName} at {attackerName} ({edge.Kills} deaths)");
+            return;
+        }
+
+        // 3) Highlight: a spectacular kill draws a comment from a bystander.
+        int score = HighlightScorer.Score(new KillContext
+        {
+            Weapon = @event.Weapon,
+            Headshot = @event.Headshot,
+            Noscope = @event.Noscope,
+            ThruSmoke = @event.Thrusmoke,
+            AttackerBlind = @event.Attackerblind,
+            Penetrated = @event.Penetrated,
+            Distance = @event.Distance,
+            AttackerInAir = @event.Attackerinair,
+            AttackerHp = attacker.PlayerPawn.Value?.Health ?? 0,
+            KillStreakInWindow = streak
+        });
+        if (score >= Config.Banter.HighlightScoreThreshold
+            && RollPercent(Config.Banter.HighlightChancePercent))
+        {
+            var commentator = PickBanterSpeaker(now, excludeA: attacker.Slot, excludeB: victim.Slot);
+            if (commentator != null
+                && TryBanterSay(commentator, _banterHighlightMessages, attackerName, commentator.PlayerName, now))
+            {
+                Console.WriteLine($"[BotChat] banter highlight: {commentator.PlayerName} on {attackerName}'s kill (score {score})");
+                return;
+            }
+        }
+
+        // 4) Enemy taunt: the killer rubs it in, more likely on a repeat
+        // kill. The taunted bot may fire back once.
+        int tauntChance = Config.Banter.EnemyTauntChancePercent + (edge.Kills >= 2 ? 20 : 0);
+        if (attacker.IsBot && !attacker.HasBeenControlledByPlayerThisRound
+            && RollPercent(Math.Min(100, tauntChance))
+            && !OnBanterCooldown(attackerId, now)
+            && !RollSilence(_personas.Get(attackerId)))
+        {
+            if (TryBanterSay(attacker, _banterEnemyTauntMessages, victimName, attackerName, now))
+            {
+                Console.WriteLine($"[BotChat] banter taunt: {attackerName} -> {victimName}");
+                if (Config.Banter.MaxChainLength >= 2 && victim.IsBot
+                    && !victim.HasBeenControlledByPlayerThisRound
+                    && PersonaTraits.SpeaksWhenKilled(_personas.Get(victimId))
+                    && RollPercent(Config.Banter.ResponseChancePercent))
+                {
+                    ScheduleBanterResponse(victimId, attackerName, now);
+                }
+            }
+        }
+    }
+
+    // Tracks the attacker's kill timestamps inside a 5 second multi-kill
+    // window; returns the streak length including this kill.
+    private int RecordKillTime(ulong attackerId, double now)
+    {
+        if (!_recentKillTimes.TryGetValue(attackerId, out var times))
+        {
+            times = new List<double>();
+            _recentKillTimes[attackerId] = times;
+        }
+
+        times.RemoveAll(t => now - t > 5.0);
+        times.Add(now);
+        return times.Count;
+    }
+
+    private bool OnBanterCooldown(ulong steamId, double now) =>
+        _banterCooldownUntil.TryGetValue(steamId, out double until) && now < until;
+
+    private static bool RollSilence(Persona persona) =>
+        Random.Shared.NextDouble() < PersonaTraits.SilenceRate(persona);
+
+    // Sends one banter line as `speaker` after a human-feeling delay. Applies
+    // the per-bot cooldown and the per-round budget; the delayed send resolves
+    // the speaker by SteamID again so a disconnected or taken-over bot (or a
+    // map change) invalidates the message.
+    private bool TryBanterSay(
+        CCSPlayerController speaker,
+        (string message, int weight)[] pool,
+        string otherName,
+        string speakerName,
+        double now)
+    {
+        if (pool.Length == 0)
+            return false;
+        if (!speaker.IsBot || speaker.HasBeenControlledByPlayerThisRound)
+            return false;
+        if (OnBanterCooldown(speaker.SteamID, now))
+            return false;
+
+        string message = FormatBanter(PickMessage(pool, uniform: true), otherName, speakerName);
+        ulong speakerId = speaker.SteamID;
+        _banterCooldownUntil[speakerId] = now + Config.Banter.CooldownSeconds;
+        _banterThisRound++;
+
+        AddTimer(ReactionDelay(), () =>
+        {
+            var bot = ResolveBot(speakerId);
+            if (bot == null || !BanterEnabled.Value || !Config.Banter.Enabled)
+                return;
+            BotSay(bot, message);
+        }, TimerFlags.STOP_ON_MAPCHANGE);
+        return true;
+    }
+
+    private void ScheduleBanterResponse(ulong responderId, string tauntedByName, double now)
+    {
+        if (_banterResponseMessages.Length == 0
+            || _banterThisRound >= Config.Banter.MaxMessagesPerRound
+            || OnBanterCooldown(responderId, now))
+            return;
+
+        _banterCooldownUntil[responderId] = now + Config.Banter.CooldownSeconds;
+        _banterThisRound++;
+
+        // A beat after the taunt lands, so the exchange reads taunt -> reply.
+        float delay = ReactionDelay() + MinGap
+            + (float)Random.Shared.NextDouble() * (MaxGap - MinGap);
+        AddTimer(delay, () =>
+        {
+            var bot = ResolveBot(responderId);
+            if (bot == null || !BanterEnabled.Value || !Config.Banter.Enabled)
+                return;
+            BotSay(bot, FormatBanter(PickMessage(_banterResponseMessages, uniform: true),
+                tauntedByName, bot.PlayerName));
+        }, TimerFlags.STOP_ON_MAPCHANGE);
+    }
+
+    // {other}: the other party in the exchange; {self}: the speaker.
+    private static string FormatBanter(string template, string otherName, string speakerName) =>
+        template.Replace("{other}", otherName).Replace("{self}", speakerName);
+
+    private static CCSPlayerController? ResolveBot(ulong steamId) =>
+        Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+            .FirstOrDefault(p => p.IsValid && p.IsBot && !p.IsHLTV
+                && p.SteamID == steamId && !p.HasBeenControlledByPlayerThisRound);
+
+    // A random eligible bot to comment on someone else's play, filtered by
+    // cooldown and persona silence.
+    private CCSPlayerController? PickBanterSpeaker(double now, int excludeA, int excludeB)
+    {
+        var candidates = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+            .Where(p => p.IsValid && p.IsBot && !p.IsHLTV
+                && !p.HasBeenControlledByPlayerThisRound
+                && (p.Team == CsTeam.Terrorist || p.Team == CsTeam.CounterTerrorist)
+                && p.Slot != excludeA && p.Slot != excludeB
+                && !OnBanterCooldown(p.SteamID, now))
+            .ToList();
+        if (candidates.Count == 0)
+            return null;
+
+        var pick = candidates[Random.Shared.Next(candidates.Count)];
+        return RollSilence(_personas.Get(pick.SteamID)) ? null : pick;
     }
 
     // Picks 1..N random bots from a given list and staggers one message each.
@@ -580,6 +823,11 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         _blindKillMessages = Uniform(messages.BlindKill);
         _airborneKillMessages = Uniform(messages.AirborneKill);
         _thanksMessages = Uniform(messages.Thanks);
+        _banterHighlightMessages = Uniform(messages.Banter.Highlight);
+        _banterRevengeMessages = Uniform(messages.Banter.Revenge);
+        _banterRedHotMessages = Uniform(messages.Banter.RedHot);
+        _banterEnemyTauntMessages = Uniform(messages.Banter.EnemyTaunt);
+        _banterResponseMessages = Uniform(messages.Banter.Response);
         Console.WriteLine($"[BotChat] loaded language '{Config.Language}' from lang/{Config.Language}.yml");
     }
 

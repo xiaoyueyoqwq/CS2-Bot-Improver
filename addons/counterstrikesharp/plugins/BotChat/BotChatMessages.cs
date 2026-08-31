@@ -17,6 +17,16 @@ public sealed class BotChatMessages
     public List<string> BlindKill { get; set; } = [];
     public List<string> AirborneKill { get; set; } = [];
     public List<string> Thanks { get; set; } = [];
+    public BotChatBanterMessages Banter { get; set; } = new();
+}
+
+public sealed class BotChatBanterMessages
+{
+    public List<string> Highlight { get; set; } = [];
+    public List<string> Revenge { get; set; } = [];
+    public List<string> RedHot { get; set; } = [];
+    public List<string> EnemyTaunt { get; set; } = [];
+    public List<string> Response { get; set; } = [];
 }
 
 public sealed class BotChatTauntMessages
@@ -59,6 +69,12 @@ public static partial class BotChatMessageLoader
         Normalize(messages.BlindKill, "blind_kill", path);
         Normalize(messages.AirborneKill, "airborne_kill", path);
         Normalize(messages.Thanks, "thanks", path);
+        messages.Banter ??= new BotChatBanterMessages();
+        NormalizeOptional(messages.Banter.Highlight, "banter.highlight", path);
+        NormalizeOptional(messages.Banter.Revenge, "banter.revenge", path);
+        NormalizeOptional(messages.Banter.RedHot, "banter.red_hot", path);
+        NormalizeOptional(messages.Banter.EnemyTaunt, "banter.enemy_taunt", path);
+        NormalizeOptional(messages.Banter.Response, "banter.response", path);
 
         if (messages.MatchEnd.Count == 0)
             throw new InvalidDataException($"BotChat message pool 'match_end' is empty in {path}.");
@@ -76,6 +92,13 @@ public static partial class BotChatMessageLoader
         if (messages.Count == 0)
             throw new InvalidDataException($"BotChat message pool '{poolName}' is empty in {path}.");
 
+        NormalizeOptional(messages, poolName, path);
+    }
+
+    // Banter pools may be absent in older language files; a banter trigger
+    // whose pool is empty simply never fires.
+    private static void NormalizeOptional(List<string> messages, string poolName, string path)
+    {
         for (int i = 0; i < messages.Count; i++)
         {
             string message = messages[i]?.Trim() ?? "";

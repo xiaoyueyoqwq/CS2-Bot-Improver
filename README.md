@@ -76,7 +76,11 @@ On Windows, please download **CS2BotImprover_rules_unchanged.zip** to preserve t
 ## BotChat status
 
 The `BotChat` plugin supports localized YAML message pools and configurable
-message probabilities. Its broadcast path has been verified on a server with
+message probabilities. It also ships a banter layer (`Banter` config section,
+`botchat_banter_enabled`): bots hold SteamID-keyed grudges, tilt after dying
+repeatedly to the same killer, take revenge, praise highlight kills scored
+from real kill context, and taunt victims with a bounded one-reply comeback
+chain. Banter lines live in the `banter.*` pools of `lang/*.yml`. Its broadcast path has been verified on a server with
 BotHider `identity_mode: player`.
 
 BotHider `identity_mode: bot` still has an unresolved delivery limitation:

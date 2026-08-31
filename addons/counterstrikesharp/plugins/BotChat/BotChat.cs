@@ -101,14 +101,7 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         LoadMessages();
         RegisterListener<Listeners.OnMapStart>(_ =>
         {
-            _endSaid = false;
-            _startGreetingDone = false;
-            _startGreetingScheduled = false;
-            _grudges.ResetMap();
-            _personas.Reset();
-            _banterCooldownUntil.Clear();
-            _recentKillTimes.Clear();
-            _banterThisRound = 0;
+            ResetMatchState();
         });
         RegisterEventHandler<EventBeginNewMatch>(OnBeginNewMatch);
         RegisterEventHandler<EventTeamIntroStart>(OnTeamIntroStart);
@@ -127,12 +120,23 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
 
     private HookResult OnBeginNewMatch(EventBeginNewMatch @event, GameEventInfo info)
     {
-        _endSaid = false;
-        _startGreetingDone = false;
-        _startGreetingScheduled = false;
+        ResetMatchState();
         // The opening greeting is scheduled from the first formal round below.
         // BeginNewMatch can occur during warmup, before teams and BOTs exist.
         return HookResult.Continue;
+    }
+
+    private void ResetMatchState()
+    {
+        _endSaid = false;
+        _startGreetingDone = false;
+        _startGreetingScheduled = false;
+        _owedThanks.Clear();
+        _grudges.ResetMap();
+        _personas.Reset();
+        _banterCooldownUntil.Clear();
+        _recentKillTimes.Clear();
+        _banterThisRound = 0;
     }
 
     private HookResult OnTeamIntroStart(EventTeamIntroStart @event, GameEventInfo info)
@@ -424,7 +428,7 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             $"headshot={@event.Headshot} blind={@event.Attackerblind} smoke={@event.Thrusmoke} " +
             $"wall={@event.Penetrated} air={@event.Attackerinair}");
 
-        if (IsDeathmatch() || !Enabled.Value)
+        if (IsDeathmatch() || IsWarmupPeriod() || !Enabled.Value)
             return HookResult.Continue;
 
         if (victim == null || !victim.IsValid || victim.IsHLTV)
@@ -544,14 +548,16 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             return;
         }
 
-        // 2) Red-hot: the victim has now died to the same tormentor enough
-        // times to tilt. Fires once, at the moment the grudge boils over.
+        // 2) Red-hot: the victim has now died to the same tormentor at least
+        // three times. Fires once when the threshold is reached and the
+        // configured roll succeeds, even if an earlier ns reaction won.
         if (victim.IsBot && !victim.HasBeenControlledByPlayerThisRound && !victimSpoke
-            && edge.Kills == 3 && _grudges.IsRedHot(victimId, attackerId)
+            && edge.Kills >= 3 && _grudges.IsRedHot(victimId, attackerId)
             && PersonaTraits.SpeaksWhenKilled(_personas.Get(victimId))
             && RollPercent(Config.Banter.RedHotChancePercent)
             && TryBanterSay(victim, _banterRedHotMessages, attackerName, victimName, now))
         {
+            _grudges.ClearRedHot(victimId, attackerId);
             Console.WriteLine($"[BotChat] banter red-hot: {victimName} at {attackerName} ({edge.Kills} deaths)");
             return;
         }
@@ -848,6 +854,7 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     private void BotSay(CCSPlayerController bot, string message, Func<bool>? featureEnabled = null)
     {
         if (IsDeathmatch()
+            || IsWarmupPeriod()
             || !Enabled.Value
             || featureEnabled?.Invoke() == false
             || bot == null

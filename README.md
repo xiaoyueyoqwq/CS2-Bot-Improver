@@ -73,6 +73,18 @@ On Windows, please download **CS2BotImprover_rules_unchanged.zip** to preserve t
    <img width="130" height="153" alt="Opening CS2 properties in Steam" src="https://github.com/user-attachments/assets/4c775e36-3fc3-4a19-9cb1-4f0c9327838c" /><br>
    <img width="625" height="423" alt="Adding -insecure to the CS2 launch options" src="https://github.com/user-attachments/assets/ac0b0c57-ee67-4e33-96fb-146d14714fc8" />
 
+## BotChat status
+
+The `BotChat` plugin supports localized YAML message pools and configurable
+message probabilities. Its broadcast path has been verified on a server with
+BotHider `identity_mode: player`.
+
+BotHider `identity_mode: bot` still has an unresolved delivery limitation:
+messages are not reliably visible when sent through the fake-client identity.
+This branch does not claim that mode is fixed; the remaining work belongs in
+the BotHider/native fake-client send path. Use `identity_mode: player` when
+BotChat output is required until that path is investigated further.
+
 ## Commands
 
 ### Aim

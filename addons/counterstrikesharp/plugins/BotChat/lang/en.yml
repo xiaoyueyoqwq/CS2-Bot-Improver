@@ -1,0 +1,64 @@
+start:
+  - gl
+  - hf
+  - glhf
+  - hfhf
+  - good luck
+  - have fun
+
+half_time:
+  - gh
+  - good half
+  - gl next half
+
+match_end:
+  gg: 45
+  ggs: 30
+  GG: 20
+
+taunts:
+  dominant_win:
+    - ez
+    - too easy
+    - one-sided
+  half_time:
+    - good lead
+    - keep it going
+    - looking good
+  after_win:
+    - gg
+    - got the win
+    - well played
+
+nice_shot:
+  - ns
+  - nice shot
+
+headshot:
+  - ns
+  - nice shot
+
+through_smoke:
+  - through smoke?
+  - lucky smoke?
+
+wallbang:
+  - wallbang?
+  - through the wall?
+
+blind_kill:
+  - blind kill?
+  - you were blind?
+
+airborne_kill:
+  - jumping kill?
+  - mid-air?
+
+thanks:
+  - ty
+  - thanks
+  - thank u
+  - thx
+  - life game
+  - luck
+  - ":)"

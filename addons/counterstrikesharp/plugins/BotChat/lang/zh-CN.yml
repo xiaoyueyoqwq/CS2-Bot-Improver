@@ -1,0 +1,78 @@
+start:
+  - gl
+  - hf
+  - glhf
+  - 加油
+  - 祝好运
+
+half_time:
+  - good half
+  - good next half
+  - 换边换边
+  - 继续
+  - 继续继续
+
+match_end:
+  gg ez: 45
+  eeeeez: 30
+  bot noob: 20
+
+taunts:
+  dominant_win:
+    - sit
+    - 上强度啊ez
+    - Cry more lol
+  half_time:
+    - ez
+    - 上强度啊
+    - Close your eyes, it'll be over soon.
+  after_win:
+    - 拿了
+    - Mad?
+    - Refound the game ezzzzzz
+    - ez
+
+nice_shot:
+  - 好枪
+  - 准啊
+  - 漂亮
+  - 牛逼
+  - 有点准
+
+headshot:
+  - 好头
+  - 一枪头
+  - 准的
+  - 这头可以
+  - 这么准
+
+through_smoke:
+  - 这能穿？
+  - 这都能混到？
+  - 开了吗这么准
+  - 开了是吧
+  - 狗运
+
+wallbang:
+  - 这都能穿
+  - 好穿
+  - 这也能穿
+
+blind_kill:
+  - 全白也能杀？
+  - 这也能打到
+  - 牛逼
+
+airborne_kill:
+  - 好枪
+  - 跳着也能打？
+  - 这也能中？
+  - 开了
+
+thanks:
+  - 谢了
+  - 哈哈
+  - 运气
+  - 蒙的
+  - 手感火热
+  - ":)"

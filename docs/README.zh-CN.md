@@ -74,6 +74,16 @@ CS2-Bot-Improver 面向喜欢与人机博弈，或想和朋友一起挑战人机
    <img width="130" height="153" alt="在 Steam 中打开 CS2 属性" src="https://github.com/user-attachments/assets/4c775e36-3fc3-4a19-9cb1-4f0c9327838c" /><br>
    <img width="625" height="423" alt="在 CS2 启动项中添加 -insecure" src="https://github.com/user-attachments/assets/ac0b0c57-ee67-4e33-96fb-146d14714fc8" />
 
+## BotChat 状态
+
+`BotChat` 插件支持 YAML 本地化消息池和可配置的消息概率。当前已在
+BotHider `identity_mode: player` 的服务器配置下验证广播消息可见。
+
+BotHider `identity_mode: bot` 仍存在未解决的发送限制：通过 fake-client
+身份发送的消息无法稳定显示。本分支不宣称已经修复该模式；后续需要继续
+排查 BotHider/native fake-client 的发送链路。在需要 BotChat 输出时，请先
+使用 `identity_mode: player`。
+
 ## 命令
 
 ### 瞄准

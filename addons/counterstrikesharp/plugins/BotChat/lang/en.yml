@@ -10,49 +10,79 @@ half_time:
   - gh
   - good half
   - gl next half
+  - switch sides, same fight
+  - keep it rolling
 
 match_end:
   gg: 45
   ggs: 30
   GG: 20
+  "gg ez": 15
+  "eeeeez": 10
+  "bot noob": 8
 
 taunts:
   dominant_win:
     - ez
     - too easy
     - one-sided
+    - sit down, ez
+    - cry more
+    - "that was not even close"
   half_time:
     - good lead
     - keep it going
     - looking good
+    - ez
+    - "close your eyes, it will be over soon"
   after_win:
     - gg
     - got the win
     - well played
+    - got the dub
+    - mad?
+    - "refund the game, ezzzzzz"
 
 nice_shot:
   - ns
   - nice shot
+  - clean aim
+  - beautiful
+  - that was crisp
 
 headshot:
   - ns
   - nice shot
+  - nice head
+  - one-tap
+  - "that head was free"
+  - so clean
 
 through_smoke:
   - through smoke?
   - lucky smoke?
+  - "you saw me through that?"
+  - "are you cheating or just lucky?"
+  - wallhack smoke
 
 wallbang:
   - wallbang?
   - through the wall?
+  - nice wallbang
+  - "that wall was paper"
 
 blind_kill:
   - blind kill?
   - you were blind?
+  - "full blind and still dead"
+  - "how did that hit?"
 
 airborne_kill:
   - jumping kill?
   - mid-air?
+  - "jumping headshot, nice"
+  - "you hit that mid-air?"
+  - "okay, that was disgusting"
 
 thanks:
   - ty
@@ -74,6 +104,18 @@ banter:
     - pro server is that way
     - ok that was clean
     - HLTV top 10 incoming
+    - "how did that even kill?"
+    - "{other} is living rent-free in their heads"
+    - clip it, no way
+    - "that belongs in a frag movie"
+    - "are you playing a Major right now?"
+    - "the server just got humbled"
+    - "I am not peeking that again"
+    - "okay, that was filthy"
+    - "someone check {other}'s mouse"
+    - "that aim is illegal"
+    - "the highlight music is already playing"
+    - "respect, that was a banger"
 
   revenge:
     - "FINALLY. get rekt {other}"
@@ -81,6 +123,10 @@ banter:
     - revenge is sweet
     - we're even now
     - "{other} how the tables turn"
+    - "karma finally clocked in"
+    - "I waited three rounds for that"
+    - "revenge arc complete"
+    - "we are square now"
 
   red_hot:
     - "you again?? ok I'm remembering this {other}"
@@ -88,6 +134,10 @@ banter:
     - "everyone leave {other} alone, he's MINE"
     - I'm counting every one of these
     - not funny anymore
+    - "{other}, you are living rent-free in my head"
+    - "I am not stopping until I get you"
+    - "this is personal now"
+    - "you are my nemesis, apparently"
 
   enemy_taunt:
     - too easy
@@ -97,6 +147,16 @@ banter:
     - "{other} you keep walking into my crosshair"
     - do you even hear footsteps
     - guess why I was waiting there
+    - "your route is free real estate"
+    - "try a different lane, buddy"
+    - "you peek like you want to die"
+    - "same spot, same result"
+    - "I know your timing by heart"
+    - "thanks for donating the kill"
+    - "you keep walking into the same crosshair"
+    - "I could do this all day"
+    - "your footsteps gave you away"
+    - "I have your whole playbook"
 
   response:
     - "?"
@@ -106,3 +166,9 @@ banter:
     - camping isn't skill
     - my bad, lagged
     - "{other} just wait for next round"
+    - "you coaching me now?"
+    - "come out of spawn and fight me"
+    - "one lucky bullet and you are talking?"
+    - "sure, you are a pro now"
+    - "who called that rotate?"
+    - "my bad, I whiffed"

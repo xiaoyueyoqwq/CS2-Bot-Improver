@@ -9,7 +9,6 @@ public sealed class BotChatMessages
     public List<string> Start { get; set; } = [];
     public List<string> HalfTime { get; set; } = [];
     public Dictionary<string, int> MatchEnd { get; set; } = [];
-    public BotChatTauntMessages Taunts { get; set; } = new();
     public List<string> NiceShot { get; set; } = [];
     public List<string> Headshot { get; set; } = [];
     public List<string> ThroughSmoke { get; set; } = [];
@@ -17,23 +16,6 @@ public sealed class BotChatMessages
     public List<string> BlindKill { get; set; } = [];
     public List<string> AirborneKill { get; set; } = [];
     public List<string> Thanks { get; set; } = [];
-    public BotChatBanterMessages Banter { get; set; } = new();
-}
-
-public sealed class BotChatBanterMessages
-{
-    public List<string> Highlight { get; set; } = [];
-    public List<string> Revenge { get; set; } = [];
-    public List<string> RedHot { get; set; } = [];
-    public List<string> EnemyTaunt { get; set; } = [];
-    public List<string> Response { get; set; } = [];
-}
-
-public sealed class BotChatTauntMessages
-{
-    public List<string> DominantWin { get; set; } = [];
-    public List<string> HalfTime { get; set; } = [];
-    public List<string> AfterWin { get; set; } = [];
 }
 
 public static partial class BotChatMessageLoader
@@ -59,9 +41,6 @@ public static partial class BotChatMessageLoader
 
         Normalize(messages.Start, "start", path);
         Normalize(messages.HalfTime, "half_time", path);
-        Normalize(messages.Taunts.DominantWin, "taunts.dominant_win", path);
-        Normalize(messages.Taunts.HalfTime, "taunts.half_time", path);
-        Normalize(messages.Taunts.AfterWin, "taunts.after_win", path);
         Normalize(messages.NiceShot, "nice_shot", path);
         Normalize(messages.Headshot, "headshot", path);
         Normalize(messages.ThroughSmoke, "through_smoke", path);
@@ -69,13 +48,7 @@ public static partial class BotChatMessageLoader
         Normalize(messages.BlindKill, "blind_kill", path);
         Normalize(messages.AirborneKill, "airborne_kill", path);
         Normalize(messages.Thanks, "thanks", path);
-        messages.Banter ??= new BotChatBanterMessages();
-        NormalizeOptional(messages.Banter.Highlight, "banter.highlight", path);
-        NormalizeOptional(messages.Banter.Revenge, "banter.revenge", path);
-        NormalizeOptional(messages.Banter.RedHot, "banter.red_hot", path);
-        NormalizeOptional(messages.Banter.EnemyTaunt, "banter.enemy_taunt", path);
-        NormalizeOptional(messages.Banter.Response, "banter.response", path);
-
+        messages.MatchEnd ??= [];
         if (messages.MatchEnd.Count == 0)
             throw new InvalidDataException($"BotChat message pool 'match_end' is empty in {path}.");
         foreach (var (message, weight) in messages.MatchEnd)
@@ -87,18 +60,19 @@ public static partial class BotChatMessageLoader
         return messages;
     }
 
-    private static void Normalize(List<string> messages, string poolName, string path)
+    private static void Normalize(List<string>? messages, string poolName, string path)
     {
+        messages ??= [];
         if (messages.Count == 0)
             throw new InvalidDataException($"BotChat message pool '{poolName}' is empty in {path}.");
 
         NormalizeOptional(messages, poolName, path);
     }
 
-    // Banter pools may be absent in older language files; a banter trigger
-    // whose pool is empty simply never fires.
-    private static void NormalizeOptional(List<string> messages, string poolName, string path)
+    // Required pools are validated before the plugin starts.
+    private static void NormalizeOptional(List<string>? messages, string poolName, string path)
     {
+        messages ??= [];
         for (int i = 0; i < messages.Count; i++)
         {
             string message = messages[i]?.Trim() ?? "";

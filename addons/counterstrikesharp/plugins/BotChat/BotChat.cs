@@ -1,13 +1,11 @@
-// BotChat plugin: bots greet at match start, react to kills, and wrap up at
-// match end. Configured taunts are sent only by bots on the leading team.
+// BotChat base plugin: greetings, match-end lines and kill reactions.
 //
 // Convars:
 //   botchat_enabled              - master switch (default 1)
 //   botchat_start_enabled        - greetings at match start (default 1)
 //   botchat_halftime_enabled     - halftime messages (default 1)
-//   botchat_end_enabled          - goodbyes and taunts at match end (default 1)
+//   botchat_end_enabled          - goodbyes at match end (default 1)
 //   botchat_killreactions_enabled - kill reactions (ns / thanks) (default 1)
-//   botchat_banter_enabled       - grudge/persona banter reactions (default 1)
 
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
@@ -16,13 +14,15 @@ using CounterStrikeSharp.API.Modules.Cvars;
 using CounterStrikeSharp.API.Modules.Events;
 using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
+using CounterStrikeSharp.API.Core.Capabilities;
+using BotChatApi;
 
 namespace BotChat;
 
 public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
 {
     public override string ModuleName => "BotChat";
-    public override string ModuleVersion => "1.3.0";
+    public override string ModuleVersion => "2.0.0";
     public override string ModuleAuthor => "Fimall";
     public override string ModuleDescription =>
         "Bots greet at match start, say gg at match end, and chat about kills";
@@ -32,9 +32,6 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     private (string message, int weight)[] _startMessages = [];
     private (string message, int weight)[] _halfTimeMessages = [];
     private (string message, int weight)[] _matchEndMessages = [];
-    private (string message, int weight)[] _dominantWinTauntMessages = [];
-    private (string message, int weight)[] _halfTimeTauntMessages = [];
-    private (string message, int weight)[] _afterWinTauntMessages = [];
     private (string message, int weight)[] _niceShotMessages = [];
     private (string message, int weight)[] _headshotMessages = [];
     private (string message, int weight)[] _smokeMessages = [];
@@ -42,11 +39,6 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     private (string message, int weight)[] _blindKillMessages = [];
     private (string message, int weight)[] _airborneKillMessages = [];
     private (string message, int weight)[] _thanksMessages = [];
-    private (string message, int weight)[] _banterHighlightMessages = [];
-    private (string message, int weight)[] _banterRevengeMessages = [];
-    private (string message, int weight)[] _banterRedHotMessages = [];
-    private (string message, int weight)[] _banterEnemyTauntMessages = [];
-    private (string message, int weight)[] _banterResponseMessages = [];
 
     private const int AbsoluteMaxSpeakersPerTeam = 5;
 
@@ -67,38 +59,34 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     // Bots that owe a thanks reply this round (their shot got complimented
     // with "ns"). They thank on their own death, or at round end if alive.
     private readonly HashSet<ulong> _owedThanks = new();
+    private readonly BotChatApiImpl _api;
     private bool _startGreetingDone;
     private bool _startGreetingScheduled;
 
-    // Banter state: map-scoped grudge memory and persona casting, plus the
-    // per-round budget and per-bot cooldowns that keep chatter human-paced.
-    private readonly GrudgeGraph _grudges = new();
-    private readonly PersonaAssigner _personas = new();
-    private readonly Dictionary<ulong, double> _banterCooldownUntil = new();
-    private readonly Dictionary<ulong, List<double>> _recentKillTimes = new();
-    private int _banterThisRound;
+    public BotChatPlugin()
+    {
+        _api = new BotChatApiImpl(this);
+    }
 
     public FakeConVar<bool> Enabled = new("botchat_enabled", "Enable bot chat messages", true);
     public FakeConVar<bool> StartEnabled = new("botchat_start_enabled", "Bots greet at match start", true);
     public FakeConVar<bool> HalfTimeEnabled = new("botchat_halftime_enabled", "Bots chat at halftime", true);
     public FakeConVar<bool> EndEnabled = new("botchat_end_enabled", "Bots say goodbye at match end", true);
     public FakeConVar<bool> KillReactionsEnabled = new("botchat_killreactions_enabled", "Bots react to kills (ns / thanks)", true);
-    public FakeConVar<bool> BanterEnabled = new("botchat_banter_enabled", "Bots hold grudges, take revenge and talk trash", true);
+    public static PluginCapability<IBotChatApi> Capability { get; } = BotChatCapability.Cap;
 
     public void OnConfigParsed(BotChatConfig config)
     {
         Config = config ?? new BotChatConfig();
+        Config.Version = 2;
         Config.Chat ??= new BotChatFrequencyConfig();
         Config.Chat.Normalize();
-        Config.Taunts ??= new BotChatTauntConfig();
-        Config.Taunts.Normalize();
-        Config.Banter ??= new BotChatBanterConfig();
-        Config.Banter.Normalize();
     }
 
     public override void Load(bool hotReload)
     {
         LoadMessages();
+        Capabilities.RegisterPluginCapability(Capability, () => _api);
         RegisterListener<Listeners.OnMapStart>(_ =>
         {
             ResetMatchState();
@@ -132,11 +120,7 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         _startGreetingDone = false;
         _startGreetingScheduled = false;
         _owedThanks.Clear();
-        _grudges.ResetMap();
-        _personas.Reset();
-        _banterCooldownUntil.Clear();
-        _recentKillTimes.Clear();
-        _banterThisRound = 0;
+        _api.ResetReservations();
     }
 
     private HookResult OnTeamIntroStart(EventTeamIntroStart @event, GameEventInfo info)
@@ -168,16 +152,12 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
 
     private HookResult OnStartHalftime(EventStartHalftime @event, GameEventInfo info)
     {
-        // Tilt does not survive the side switch.
-        _grudges.ResetHalf();
-
         if (IsDeathmatch() || !Enabled.Value || !HalfTimeEnabled.Value)
             return HookResult.Continue;
 
         if (RollPercent(Config.Chat.HalftimeMessageChancePercent))
             SayAcrossTeams(_halfTimeMessages, uniform: true, baseDelay: 1.0f,
                 featureEnabled: () => HalfTimeEnabled.Value);
-        AddTimer(0.2f, TrySayHalftimeTaunt);
         return HookResult.Continue;
     }
 
@@ -207,98 +187,6 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         if (RollPercent(Config.Chat.MatchEndMessageChancePercent))
             SayAcrossTeams(_matchEndMessages, uniform: false, baseDelay: 1.5f,
                 featureEnabled: () => EndEnabled.Value);
-        AddTimer(0.2f, TrySayMatchEndTaunt);
-    }
-
-    private void TrySayHalftimeTaunt()
-    {
-        if (IsDeathmatch() || !Enabled.Value || !HalfTimeEnabled.Value || !Config.Taunts.Enabled)
-            return;
-        if (!TryGetTeamScores(firstHalfOnly: true, out int terroristScore, out int counterTerroristScore))
-            return;
-
-        int scoreGap = Math.Abs(terroristScore - counterTerroristScore);
-        if (scoreGap < Config.Taunts.HalftimeScoreGapThreshold
-            || !RollPercent(Config.Taunts.HalftimeChancePercent))
-            return;
-
-        CsTeam leadingTeam = terroristScore > counterTerroristScore
-            ? CsTeam.Terrorist
-            : CsTeam.CounterTerrorist;
-        SayToTeam(leadingTeam, _halfTimeTauntMessages, baseDelay: 2.5f,
-            featureEnabled: () => HalfTimeEnabled.Value && Config.Taunts.Enabled);
-    }
-
-    private void TrySayMatchEndTaunt()
-    {
-        if (IsDeathmatch() || !Enabled.Value || !EndEnabled.Value || !Config.Taunts.Enabled)
-            return;
-        if (!TryGetTeamScores(firstHalfOnly: false, out int terroristScore, out int counterTerroristScore))
-            return;
-        if (terroristScore == counterTerroristScore)
-            return;
-
-        int scoreGap = Math.Abs(terroristScore - counterTerroristScore);
-        bool dominantWin = scoreGap >= Config.Taunts.DominantWinScoreGapThreshold;
-        int chance = dominantWin
-            ? Config.Taunts.DominantWinChancePercent
-            : Config.Taunts.AfterWinChancePercent;
-        if (!RollPercent(chance))
-            return;
-
-        CsTeam winningTeam = terroristScore > counterTerroristScore
-            ? CsTeam.Terrorist
-            : CsTeam.CounterTerrorist;
-        var pool = dominantWin ? _dominantWinTauntMessages : _afterWinTauntMessages;
-        SayToTeam(winningTeam, pool, baseDelay: 3.0f,
-            featureEnabled: () => EndEnabled.Value && Config.Taunts.Enabled);
-    }
-
-    private void SayToTeam(
-        CsTeam team,
-        (string message, int weight)[] pool,
-        float baseDelay,
-        Func<bool>? featureEnabled = null)
-    {
-        var bots = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
-            .Where(p => p.IsValid
-                && p.IsBot
-                && !p.IsHLTV
-                && p.Team == team
-                && !p.HasBeenControlledByPlayerThisRound)
-            .ToList();
-        SayRandom(bots, pool, uniform: true, baseDelay, featureEnabled);
-    }
-
-    private static bool TryGetTeamScores(
-        bool firstHalfOnly,
-        out int terroristScore,
-        out int counterTerroristScore)
-    {
-        terroristScore = 0;
-        counterTerroristScore = 0;
-
-        var teams = Utilities.FindAllEntitiesByDesignerName<CCSTeam>("cs_team_manager")
-            .Where(team => team.IsValid)
-            .ToList();
-        if (teams.Count == 0)
-        {
-            teams = Utilities.FindAllEntitiesByDesignerName<CCSTeam>("team_manager")
-                .Where(team => team.IsValid)
-                .ToList();
-        }
-
-        var terrorist = teams.FirstOrDefault(team => team.TeamNum == (byte)CsTeam.Terrorist);
-        var counterTerrorist = teams.FirstOrDefault(team => team.TeamNum == (byte)CsTeam.CounterTerrorist);
-        if (terrorist == null || counterTerrorist == null)
-        {
-            Console.WriteLine("[BotChat] team score entities are unavailable; taunt skipped");
-            return false;
-        }
-
-        terroristScore = firstHalfOnly ? terrorist.ScoreFirstHalf : terrorist.Score;
-        counterTerroristScore = firstHalfOnly ? counterTerrorist.ScoreFirstHalf : counterTerrorist.Score;
-        return true;
     }
 
     private static bool RollPercent(int chancePercent)
@@ -369,9 +257,6 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     private HookResult OnRoundStart(EventRoundStart @event, GameEventInfo info)
     {
         _owedThanks.Clear();
-        _banterThisRound = 0;
-        _recentKillTimes.Clear();
-        _grudges.DecayRound();
         if (!_startGreetingDone && !_startGreetingScheduled
             && !IsDeathmatch() && Enabled.Value && StartEnabled.Value
             && !IsWarmupPeriod())
@@ -394,7 +279,7 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
                 && !p.IsHLTV
                 && !p.HasBeenControlledByPlayerThisRound
                 && p.PawnIsAlive
-                && _owedThanks.Contains(p.SteamID))
+                && _owedThanks.Contains(PlayerStateKey(p)))
             .ToList();
         if (aliveThankers.Count == 0)
             return HookResult.Continue;
@@ -405,8 +290,7 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         {
             string message = PickMessage(_thanksMessages, uniform: true);
             float scheduled = delay;
-            AddTimer(scheduled, () => BotSay(bot, message,
-                () => KillReactionsEnabled.Value));
+            ScheduleBotSay(bot, message, scheduled, () => KillReactionsEnabled.Value);
             delay += MinGap + (float)Random.Shared.NextDouble() * (MaxGap - MinGap);
         }
 
@@ -438,11 +322,8 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             || attacker.Team == victim.Team || attacker.Slot == victim.Slot)
             return HookResult.Continue;
 
-        bool victimSpoke = false;
         if (KillReactionsEnabled.Value && victim.IsBot)
-            victimSpoke = HandleKillReactions(@event, victim, attacker);
-
-        HandleBanterOnDeath(@event, victim, attacker, victimSpoke);
+            HandleKillReactions(@event, victim, attacker);
         return HookResult.Continue;
     }
 
@@ -479,239 +360,40 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             $"(headshot={@event.Headshot} blind={@event.Attackerblind} smoke={@event.Thrusmoke} " +
             $"wall={@event.Penetrated} air={@event.Attackerinair})");
 
+        bool reactionScheduled = false;
         if (reactionTriggered)
         {
             var reaction = PickVictimReaction(@event);
-            if (reaction.IsCompliment
+            reactionScheduled = ScheduleBotSay(victim, reaction.Message, ReactionDelay(),
+                () => KillReactionsEnabled.Value);
+            if (reactionScheduled && reaction.IsCompliment
                 && attacker.IsBot
                 && !attacker.HasBeenControlledByPlayerThisRound)
             {
-                _owedThanks.Add(attacker.SteamID);
+                _owedThanks.Add(PlayerStateKey(attacker));
                 Console.WriteLine(
                     $"[BotChat] owed-thanks += steamid {attacker.SteamID} ({attacker.PlayerName})");
             }
-            AddTimer(ReactionDelay(), () => BotSay(victim, reaction.Message,
-                () => KillReactionsEnabled.Value));
         }
 
         // 2) This victim, if it owed a thanks reply from an earlier ns, pays
         // it back now that it died (one reply only; the owed entry is
         // consumed so the round end won't repeat it).
-        if (_owedThanks.Remove(victim.SteamID))
+        ulong victimKey = PlayerStateKey(victim);
+        if (!reactionScheduled && _owedThanks.Contains(victimKey))
         {
             Console.WriteLine(
                 $"[BotChat] death-thanks: {victimName} (slot {victim.Slot}) replies to {attackerName}");
             string thanks = PickMessage(_thanksMessages, uniform: true);
-            AddTimer(ReactionDelay(), () => BotSay(victim, thanks,
-                () => KillReactionsEnabled.Value));
-            return true;
-        }
-
-        return reactionTriggered;
-    }
-
-    // Grudge-aware banter. Exactly one banter line may fire per death, picked
-    // by priority: revenge > red-hot > highlight praise > enemy taunt. A
-    // taunted bot may fire back once (chain of two at most).
-    private void HandleBanterOnDeath(
-        EventPlayerDeath @event,
-        CCSPlayerController victim,
-        CCSPlayerController attacker,
-        bool victimSpoke)
-    {
-        if (!BanterEnabled.Value || !Config.Banter.Enabled)
-            return;
-
-        ulong attackerId = attacker.SteamID;
-        ulong victimId = victim.SteamID;
-        string attackerName = attacker.PlayerName;
-        string victimName = victim.PlayerName;
-        double now = Server.CurrentTime;
-
-        bool isRevenge = Config.Banter.RevengeEnabled && _grudges.IsRevenge(attackerId, victimId);
-        if (isRevenge)
-            _grudges.ClearRedHot(attackerId, victimId);
-
-        var edge = _grudges.RecordKill(attackerId, victimId);
-        int streak = RecordKillTime(attackerId, now);
-
-        if (_banterThisRound >= Config.Banter.MaxMessagesPerRound)
-            return;
-
-        // 1) Revenge: the attacker was red-hot at this victim and finally
-        // got them back. Red-hot bots never shut up, so no silence gate.
-        if (isRevenge && attacker.IsBot && !attacker.HasBeenControlledByPlayerThisRound
-            && RollPercent(Config.Banter.RevengeChancePercent)
-            && TryBanterSay(attacker, _banterRevengeMessages, victimName, attackerName, now))
-        {
-            Console.WriteLine($"[BotChat] banter revenge: {attackerName} -> {victimName}");
-            return;
-        }
-
-        // 2) Red-hot: the victim has now died to the same tormentor at least
-        // three times. Fires once when the threshold is reached and the
-        // configured roll succeeds, even if an earlier ns reaction won.
-        if (victim.IsBot && !victim.HasBeenControlledByPlayerThisRound && !victimSpoke
-            && edge.Kills >= 3 && _grudges.IsRedHot(victimId, attackerId)
-            && PersonaTraits.SpeaksWhenKilled(_personas.Get(victimId))
-            && RollPercent(Config.Banter.RedHotChancePercent)
-            && TryBanterSay(victim, _banterRedHotMessages, attackerName, victimName, now))
-        {
-            _grudges.ClearRedHot(victimId, attackerId);
-            Console.WriteLine($"[BotChat] banter red-hot: {victimName} at {attackerName} ({edge.Kills} deaths)");
-            return;
-        }
-
-        // 3) Highlight: a spectacular kill draws a comment from a bystander.
-        int score = HighlightScorer.Score(new KillContext
-        {
-            Weapon = @event.Weapon,
-            Headshot = @event.Headshot,
-            Noscope = @event.Noscope,
-            ThruSmoke = @event.Thrusmoke,
-            AttackerBlind = @event.Attackerblind,
-            Penetrated = @event.Penetrated,
-            Distance = @event.Distance,
-            AttackerInAir = @event.Attackerinair,
-            AttackerHp = attacker.PlayerPawn.Value?.Health ?? 0,
-            KillStreakInWindow = streak
-        });
-        if (score >= Config.Banter.HighlightScoreThreshold
-            && RollPercent(Config.Banter.HighlightChancePercent))
-        {
-            var commentator = PickBanterSpeaker(now, excludeA: attacker.Slot, excludeB: victim.Slot);
-            if (commentator != null
-                && TryBanterSay(commentator, _banterHighlightMessages, attackerName, commentator.PlayerName, now))
+            if (ScheduleBotSay(victim, thanks, ReactionDelay(),
+                () => KillReactionsEnabled.Value))
             {
-                Console.WriteLine($"[BotChat] banter highlight: {commentator.PlayerName} on {attackerName}'s kill (score {score})");
-                return;
+                _owedThanks.Remove(victimKey);
+                return true;
             }
         }
 
-        // 4) Enemy taunt: the killer rubs it in, more likely on a repeat
-        // kill. The taunted bot may fire back once.
-        int tauntChance = Config.Banter.EnemyTauntChancePercent + (edge.Kills >= 2 ? 20 : 0);
-        if (attacker.IsBot && !attacker.HasBeenControlledByPlayerThisRound
-            && RollPercent(Math.Min(100, tauntChance))
-            && !OnBanterCooldown(attackerId, now)
-            && !RollSilence(_personas.Get(attackerId)))
-        {
-            if (TryBanterSay(attacker, _banterEnemyTauntMessages, victimName, attackerName, now))
-            {
-                Console.WriteLine($"[BotChat] banter taunt: {attackerName} -> {victimName}");
-                if (Config.Banter.MaxChainLength >= 2 && victim.IsBot
-                    && !victim.HasBeenControlledByPlayerThisRound
-                    && PersonaTraits.SpeaksWhenKilled(_personas.Get(victimId))
-                    && RollPercent(Config.Banter.ResponseChancePercent))
-                {
-                    ScheduleBanterResponse(victimId, attackerName, now);
-                }
-            }
-        }
-    }
-
-    // Tracks the attacker's kill timestamps inside a 5 second multi-kill
-    // window; returns the streak length including this kill.
-    private int RecordKillTime(ulong attackerId, double now)
-    {
-        if (!_recentKillTimes.TryGetValue(attackerId, out var times))
-        {
-            times = new List<double>();
-            _recentKillTimes[attackerId] = times;
-        }
-
-        times.RemoveAll(t => now - t > 5.0);
-        times.Add(now);
-        return times.Count;
-    }
-
-    private bool OnBanterCooldown(ulong steamId, double now) =>
-        _banterCooldownUntil.TryGetValue(steamId, out double until) && now < until;
-
-    private static bool RollSilence(Persona persona) =>
-        Random.Shared.NextDouble() < PersonaTraits.SilenceRate(persona);
-
-    // Sends one banter line as `speaker` after a human-feeling delay. Applies
-    // the per-bot cooldown and the per-round budget; the delayed send resolves
-    // the speaker by SteamID again so a disconnected or taken-over bot (or a
-    // map change) invalidates the message.
-    private bool TryBanterSay(
-        CCSPlayerController speaker,
-        (string message, int weight)[] pool,
-        string otherName,
-        string speakerName,
-        double now)
-    {
-        if (pool.Length == 0)
-            return false;
-        if (!speaker.IsBot || speaker.HasBeenControlledByPlayerThisRound)
-            return false;
-        if (OnBanterCooldown(speaker.SteamID, now))
-            return false;
-
-        string message = FormatBanter(PickMessage(pool, uniform: true), otherName, speakerName);
-        ulong speakerId = speaker.SteamID;
-        _banterCooldownUntil[speakerId] = now + Config.Banter.CooldownSeconds;
-        _banterThisRound++;
-
-        AddTimer(ReactionDelay(), () =>
-        {
-            var bot = ResolveBot(speakerId);
-            if (bot == null || !BanterEnabled.Value || !Config.Banter.Enabled)
-                return;
-            BotSay(bot, message);
-        }, TimerFlags.STOP_ON_MAPCHANGE);
-        return true;
-    }
-
-    private void ScheduleBanterResponse(ulong responderId, string tauntedByName, double now)
-    {
-        if (_banterResponseMessages.Length == 0
-            || _banterThisRound >= Config.Banter.MaxMessagesPerRound
-            || OnBanterCooldown(responderId, now))
-            return;
-
-        _banterCooldownUntil[responderId] = now + Config.Banter.CooldownSeconds;
-        _banterThisRound++;
-
-        // A beat after the taunt lands, so the exchange reads taunt -> reply.
-        float delay = ReactionDelay() + MinGap
-            + (float)Random.Shared.NextDouble() * (MaxGap - MinGap);
-        AddTimer(delay, () =>
-        {
-            var bot = ResolveBot(responderId);
-            if (bot == null || !BanterEnabled.Value || !Config.Banter.Enabled)
-                return;
-            BotSay(bot, FormatBanter(PickMessage(_banterResponseMessages, uniform: true),
-                tauntedByName, bot.PlayerName));
-        }, TimerFlags.STOP_ON_MAPCHANGE);
-    }
-
-    // {other}: the other party in the exchange; {self}: the speaker.
-    private static string FormatBanter(string template, string otherName, string speakerName) =>
-        template.Replace("{other}", otherName).Replace("{self}", speakerName);
-
-    private static CCSPlayerController? ResolveBot(ulong steamId) =>
-        Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
-            .FirstOrDefault(p => p.IsValid && p.IsBot && !p.IsHLTV
-                && p.SteamID == steamId && !p.HasBeenControlledByPlayerThisRound);
-
-    // A random eligible bot to comment on someone else's play, filtered by
-    // cooldown and persona silence.
-    private CCSPlayerController? PickBanterSpeaker(double now, int excludeA, int excludeB)
-    {
-        var candidates = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
-            .Where(p => p.IsValid && p.IsBot && !p.IsHLTV
-                && !p.HasBeenControlledByPlayerThisRound
-                && (p.Team == CsTeam.Terrorist || p.Team == CsTeam.CounterTerrorist)
-                && p.Slot != excludeA && p.Slot != excludeB
-                && !OnBanterCooldown(p.SteamID, now))
-            .ToList();
-        if (candidates.Count == 0)
-            return null;
-
-        var pick = candidates[Random.Shared.Next(candidates.Count)];
-        return RollSilence(_personas.Get(pick.SteamID)) ? null : pick;
+        return reactionScheduled;
     }
 
     // Picks 1..N random bots from a given list and staggers one message each.
@@ -741,7 +423,7 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             var bot = bots[i];
             string message = PickMessage(pool, uniform);
             float scheduled = delay;
-            AddTimer(scheduled, () => BotSay(bot, message, featureEnabled));
+            ScheduleBotSay(bot, message, scheduled, featureEnabled);
             delay += MinGap + (float)Random.Shared.NextDouble() * (MaxGap - MinGap);
         }
     }
@@ -819,9 +501,6 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         _startMessages = Uniform(messages.Start);
         _halfTimeMessages = Uniform(messages.HalfTime);
         _matchEndMessages = messages.MatchEnd.Select(entry => (entry.Key.Trim(), entry.Value)).ToArray();
-        _dominantWinTauntMessages = Uniform(messages.Taunts.DominantWin);
-        _halfTimeTauntMessages = Uniform(messages.Taunts.HalfTime);
-        _afterWinTauntMessages = Uniform(messages.Taunts.AfterWin);
         _niceShotMessages = Uniform(messages.NiceShot);
         _headshotMessages = Uniform(messages.Headshot);
         _smokeMessages = Uniform(messages.ThroughSmoke);
@@ -829,11 +508,6 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         _blindKillMessages = Uniform(messages.BlindKill);
         _airborneKillMessages = Uniform(messages.AirborneKill);
         _thanksMessages = Uniform(messages.Thanks);
-        _banterHighlightMessages = Uniform(messages.Banter.Highlight);
-        _banterRevengeMessages = Uniform(messages.Banter.Revenge);
-        _banterRedHotMessages = Uniform(messages.Banter.RedHot);
-        _banterEnemyTauntMessages = Uniform(messages.Banter.EnemyTaunt);
-        _banterResponseMessages = Uniform(messages.Banter.Response);
         Console.WriteLine($"[BotChat] loaded language '{Config.Language}' from lang/{Config.Language}.yml");
     }
 
@@ -851,23 +525,34 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
             && gameMode.GetPrimitiveValue<int>() == 2;
     }
 
-    private void BotSay(CCSPlayerController bot, string message, Func<bool>? featureEnabled = null)
+    private bool ScheduleBotSay(
+        CCSPlayerController bot,
+        string message,
+        float delay,
+        Func<bool>? featureEnabled = null)
     {
-        if (IsDeathmatch()
-            || IsWarmupPeriod()
-            || !Enabled.Value
-            || featureEnabled?.Invoke() == false
-            || bot == null
-            || !bot.IsValid
-            || !bot.IsBot
-            || bot.IsHLTV
-            || bot.HasBeenControlledByPlayerThisRound)
+        if (!bot.IsValid || !bot.IsBot || bot.IsHLTV || bot.HasBeenControlledByPlayerThisRound)
+            return false;
+
+        var speaker = new BotChatSpeaker(bot.SteamID, bot.Slot, bot.Handle, bot.PlayerName, bot.Team);
+        var request = new BotChatMessageRequest(speaker, message);
+        long reservation = _api.TryReserveSpeaker(speaker, delay + 0.5f);
+        if (reservation == 0)
+            return false;
+
+        AddTimer(delay, () =>
         {
-            Console.WriteLine($"[BotChat] say skipped: speaker no longer eligible");
-            return;
-        }
-        BroadcastBotMessage(bot.PlayerName, bot.Team, message);
-        Console.WriteLine($"[BotChat] sent '{message}' as {bot.PlayerName} (slot {bot.Slot})");
+            try
+            {
+                if (featureEnabled?.Invoke() != false)
+                    _api.TrySendBotMessage(request, reservation);
+            }
+            finally
+            {
+                _api.ReleaseSpeaker(speaker, reservation);
+            }
+        }, TimerFlags.STOP_ON_MAPCHANGE);
+        return true;
     }
 
     private static void BroadcastBotMessage(string name, CsTeam team, string message)
@@ -880,5 +565,100 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     {
         Server.PrintToChatAll($" {ChatColors.Default}[BotChat]{ChatColors.Default}: {message}");
     }
+
+    private sealed class BotChatApiImpl(BotChatPlugin owner) : IBotChatApi
+    {
+        private const double SpeakerQuietSeconds = 4.0;
+        private readonly Dictionary<SpeakerKey, (long Token, double Until)> _speakerReservations = new();
+        private readonly Dictionary<SpeakerKey, double> _speakerQuietUntil = new();
+        private long _nextReservationToken;
+
+        public int AbiVersion => 1;
+
+        public void ResetReservations()
+        {
+            _speakerReservations.Clear();
+            _speakerQuietUntil.Clear();
+        }
+
+        public long TryReserveSpeaker(BotChatSpeaker speaker, float holdSeconds)
+        {
+            if (speaker.ControllerHandle == nint.Zero || speaker.Slot < 0
+                || holdSeconds < 0 || holdSeconds > 60)
+                return 0;
+
+            var key = SpeakerKey.From(speaker);
+            double now = Server.CurrentTime;
+            if (_speakerReservations.TryGetValue(key, out var reservation) && now < reservation.Until)
+                return 0;
+            if (_speakerQuietUntil.TryGetValue(key, out double quietUntil) && now < quietUntil)
+                return 0;
+
+            long token = ++_nextReservationToken;
+            if (token == 0)
+                token = ++_nextReservationToken;
+            _speakerReservations[key] = (token, now + holdSeconds);
+            return token;
+        }
+
+        public void ReleaseSpeaker(BotChatSpeaker speaker, long reservationToken)
+        {
+            var key = SpeakerKey.From(speaker);
+            if (_speakerReservations.TryGetValue(key, out var reservation)
+                && reservation.Token == reservationToken)
+                _speakerReservations.Remove(key);
+        }
+
+        public bool TrySendBotMessage(BotChatMessageRequest request, long reservationToken)
+        {
+            if (request.Speaker.ControllerHandle == nint.Zero || string.IsNullOrWhiteSpace(request.Message))
+                return false;
+            var key = SpeakerKey.From(request.Speaker);
+            if (!_speakerReservations.TryGetValue(key, out var reservation)
+                || reservation.Token != reservationToken)
+                return false;
+
+            var bot = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+                .FirstOrDefault(p => p.IsValid && p.IsBot && !p.IsHLTV
+                    && p.Handle == request.Speaker.ControllerHandle
+                    && p.Slot == request.Speaker.Slot
+                    && (request.Speaker.SteamId == 0 || p.SteamID == request.Speaker.SteamId)
+                    && p.Team == request.Speaker.Team
+                    && !p.HasBeenControlledByPlayerThisRound);
+            if (bot == null || !owner.BotSaySnapshot(bot, request.Speaker.DisplayName, request.Speaker.Team, request.Message))
+                return false;
+
+            _speakerQuietUntil[key] = Server.CurrentTime + SpeakerQuietSeconds;
+            return true;
+        }
+
+        private readonly record struct SpeakerKey(ulong SteamId, int Slot, nint ControllerHandle)
+        {
+            public static SpeakerKey From(BotChatSpeaker speaker) =>
+                new(speaker.SteamId, speaker.Slot, speaker.ControllerHandle);
+        }
+    }
+
+    private bool BotSaySnapshot(CCSPlayerController bot, string displayName, CsTeam team, string message)
+    {
+        if (IsDeathmatch() || IsWarmupPeriod() || !Enabled.Value || !bot.IsValid || !bot.IsBot
+            || bot.IsHLTV || bot.Team != team || bot.HasBeenControlledByPlayerThisRound)
+            return false;
+
+        string safeName = SanitizeChatText(displayName, 64);
+        string safeMessage = SanitizeChatText(message, 256);
+        if (safeName.Length == 0 || safeMessage.Length == 0)
+            return false;
+
+        BroadcastBotMessage(safeName, team, safeMessage);
+        Console.WriteLine($"[BotChat] sent '{safeMessage}' as {safeName} (slot {bot.Slot})");
+        return true;
+    }
+
+    private static string SanitizeChatText(string value, int maxLength) =>
+        new(value.Where(c => !char.IsControl(c)).Take(maxLength).ToArray());
+
+    private static ulong PlayerStateKey(CCSPlayerController player) =>
+        player.SteamID != 0 ? player.SteamID : 0xffff_0000_0000_0000UL | (uint)player.Slot;
 
 }

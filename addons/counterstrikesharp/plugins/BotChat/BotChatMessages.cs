@@ -9,6 +9,7 @@ public sealed class BotChatMessages
     public List<string> Start { get; set; } = [];
     public List<string> HalfTime { get; set; } = [];
     public Dictionary<string, int> MatchEnd { get; set; } = [];
+    public BotChatTauntMessages Taunts { get; set; } = new();
     public List<string> NiceShot { get; set; } = [];
     public List<string> Headshot { get; set; } = [];
     public List<string> ThroughSmoke { get; set; } = [];
@@ -16,6 +17,13 @@ public sealed class BotChatMessages
     public List<string> BlindKill { get; set; } = [];
     public List<string> AirborneKill { get; set; } = [];
     public List<string> Thanks { get; set; } = [];
+}
+
+public sealed class BotChatTauntMessages
+{
+    public List<string> DominantWin { get; set; } = [];
+    public List<string> HalfTime { get; set; } = [];
+    public List<string> AfterWin { get; set; } = [];
 }
 
 public static partial class BotChatMessageLoader
@@ -41,6 +49,10 @@ public static partial class BotChatMessageLoader
 
         Normalize(messages.Start, "start", path);
         Normalize(messages.HalfTime, "half_time", path);
+        messages.Taunts ??= new BotChatTauntMessages();
+        Normalize(messages.Taunts.DominantWin, "taunts.dominant_win", path);
+        Normalize(messages.Taunts.HalfTime, "taunts.half_time", path);
+        Normalize(messages.Taunts.AfterWin, "taunts.after_win", path);
         Normalize(messages.NiceShot, "nice_shot", path);
         Normalize(messages.Headshot, "headshot", path);
         Normalize(messages.ThroughSmoke, "through_smoke", path);

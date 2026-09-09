@@ -14,6 +14,9 @@ public sealed class BotChatConfig : BasePluginConfig
     [JsonPropertyName("Chat")]
     public BotChatFrequencyConfig Chat { get; set; } = new();
 
+    [JsonPropertyName("Taunts")]
+    public BotChatTauntConfig Taunts { get; set; } = new();
+
 }
 
 public sealed class BotChatFrequencyConfig
@@ -48,5 +51,35 @@ public sealed class BotChatFrequencyConfig
         KillReactionBaseChancePercent = Math.Clamp(KillReactionBaseChancePercent, 0, 100);
         KillReactionHeadshotBonusPercent = Math.Clamp(KillReactionHeadshotBonusPercent, 0, 100);
         KillReactionContextBonusPercent = Math.Clamp(KillReactionContextBonusPercent, 0, 100);
+    }
+}
+
+public sealed class BotChatTauntConfig
+{
+    [JsonPropertyName("Enabled")]
+    public bool Enabled { get; set; } = true;
+
+    [JsonPropertyName("DominantWinScoreGapThreshold")]
+    public int DominantWinScoreGapThreshold { get; set; } = 5;
+
+    [JsonPropertyName("DominantWinChancePercent")]
+    public int DominantWinChancePercent { get; set; } = 40;
+
+    [JsonPropertyName("HalftimeScoreGapThreshold")]
+    public int HalftimeScoreGapThreshold { get; set; } = 3;
+
+    [JsonPropertyName("HalftimeChancePercent")]
+    public int HalftimeChancePercent { get; set; } = 35;
+
+    [JsonPropertyName("AfterWinChancePercent")]
+    public int AfterWinChancePercent { get; set; } = 30;
+
+    public void Normalize()
+    {
+        DominantWinScoreGapThreshold = Math.Max(0, DominantWinScoreGapThreshold);
+        HalftimeScoreGapThreshold = Math.Max(0, HalftimeScoreGapThreshold);
+        DominantWinChancePercent = Math.Clamp(DominantWinChancePercent, 0, 100);
+        HalftimeChancePercent = Math.Clamp(HalftimeChancePercent, 0, 100);
+        AfterWinChancePercent = Math.Clamp(AfterWinChancePercent, 0, 100);
     }
 }

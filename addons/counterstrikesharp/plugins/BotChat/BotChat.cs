@@ -1,10 +1,10 @@
-// BotChat base plugin: greetings, match-end lines and kill reactions.
+// BotChat base plugin: greetings, match-end lines, score-gap taunts, and kill reactions.
 //
 // Convars:
 //   botchat_enabled              - master switch (default 1)
 //   botchat_start_enabled        - greetings at match start (default 1)
 //   botchat_halftime_enabled     - halftime messages (default 1)
-//   botchat_end_enabled          - goodbyes at match end (default 1)
+//   botchat_end_enabled          - goodbyes and taunts at match end (default 1)
 //   botchat_killreactions_enabled - kill reactions (ns / thanks) (default 1)
 
 using CounterStrikeSharp.API;
@@ -22,7 +22,7 @@ namespace BotChat;
 public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
 {
     public override string ModuleName => "BotChat";
-    public override string ModuleVersion => "2.0.0";
+    public override string ModuleVersion => "2.0.1";
     public override string ModuleAuthor => "Fimall";
     public override string ModuleDescription =>
         "Bots greet at match start, say gg at match end, and chat about kills";
@@ -32,6 +32,9 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
     private (string message, int weight)[] _startMessages = [];
     private (string message, int weight)[] _halfTimeMessages = [];
     private (string message, int weight)[] _matchEndMessages = [];
+    private (string message, int weight)[] _dominantWinTauntMessages = [];
+    private (string message, int weight)[] _halfTimeTauntMessages = [];
+    private (string message, int weight)[] _afterWinTauntMessages = [];
     private (string message, int weight)[] _niceShotMessages = [];
     private (string message, int weight)[] _headshotMessages = [];
     private (string message, int weight)[] _smokeMessages = [];
@@ -81,6 +84,8 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         Config.Version = 2;
         Config.Chat ??= new BotChatFrequencyConfig();
         Config.Chat.Normalize();
+        Config.Taunts ??= new BotChatTauntConfig();
+        Config.Taunts.Normalize();
     }
 
     public override void Load(bool hotReload)
@@ -158,6 +163,7 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         if (RollPercent(Config.Chat.HalftimeMessageChancePercent))
             SayAcrossTeams(_halfTimeMessages, uniform: true, baseDelay: 1.0f,
                 featureEnabled: () => HalfTimeEnabled.Value);
+        AddTimer(0.2f, TrySayHalftimeTaunt);
         return HookResult.Continue;
     }
 
@@ -187,6 +193,100 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         if (RollPercent(Config.Chat.MatchEndMessageChancePercent))
             SayAcrossTeams(_matchEndMessages, uniform: false, baseDelay: 1.5f,
                 featureEnabled: () => EndEnabled.Value);
+        AddTimer(0.2f, TrySayMatchEndTaunt);
+    }
+
+    private void TrySayHalftimeTaunt()
+    {
+        if (IsDeathmatch() || !Enabled.Value || !HalfTimeEnabled.Value || !Config.Taunts.Enabled)
+            return;
+        if (!TryGetTeamScores(firstHalfOnly: true, out int terroristScore, out int counterTerroristScore))
+            return;
+
+        int scoreGap = Math.Abs(terroristScore - counterTerroristScore);
+        if (scoreGap < Config.Taunts.HalftimeScoreGapThreshold
+            || !RollPercent(Config.Taunts.HalftimeChancePercent))
+            return;
+
+        CsTeam leadingTeam = terroristScore > counterTerroristScore
+            ? CsTeam.Terrorist
+            : CsTeam.CounterTerrorist;
+        SayToTeam(leadingTeam, _halfTimeTauntMessages, baseDelay: 2.5f,
+            featureEnabled: () => HalfTimeEnabled.Value && Config.Taunts.Enabled);
+    }
+
+    private void TrySayMatchEndTaunt()
+    {
+        if (IsDeathmatch() || !Enabled.Value || !EndEnabled.Value || !Config.Taunts.Enabled)
+            return;
+        if (!TryGetTeamScores(firstHalfOnly: false, out int terroristScore, out int counterTerroristScore))
+            return;
+        if (terroristScore == counterTerroristScore)
+            return;
+
+        int scoreGap = Math.Abs(terroristScore - counterTerroristScore);
+        bool dominantWin = scoreGap >= Config.Taunts.DominantWinScoreGapThreshold;
+        int chance = dominantWin
+            ? Config.Taunts.DominantWinChancePercent
+            : Config.Taunts.AfterWinChancePercent;
+        if (!RollPercent(chance))
+            return;
+
+        CsTeam winningTeam = terroristScore > counterTerroristScore
+            ? CsTeam.Terrorist
+            : CsTeam.CounterTerrorist;
+        var pool = dominantWin ? _dominantWinTauntMessages : _afterWinTauntMessages;
+        SayToTeam(winningTeam, pool, baseDelay: 3.0f,
+            featureEnabled: () => EndEnabled.Value && Config.Taunts.Enabled);
+    }
+
+    private void SayToTeam(
+        CsTeam team,
+        (string message, int weight)[] pool,
+        float baseDelay,
+        Func<bool>? featureEnabled = null)
+    {
+        if (pool.Length == 0)
+            return;
+        var bots = Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>("cs_player_controller")
+            .Where(p => p.IsValid
+                && p.IsBot
+                && !p.IsHLTV
+                && p.Team == team
+                && !p.HasBeenControlledByPlayerThisRound)
+            .ToList();
+        SayRandom(bots, pool, uniform: true, baseDelay, featureEnabled);
+    }
+
+    private static bool TryGetTeamScores(
+        bool firstHalfOnly,
+        out int terroristScore,
+        out int counterTerroristScore)
+    {
+        terroristScore = 0;
+        counterTerroristScore = 0;
+
+        var teams = Utilities.FindAllEntitiesByDesignerName<CCSTeam>("cs_team_manager")
+            .Where(team => team.IsValid)
+            .ToList();
+        if (teams.Count == 0)
+        {
+            teams = Utilities.FindAllEntitiesByDesignerName<CCSTeam>("team_manager")
+                .Where(team => team.IsValid)
+                .ToList();
+        }
+
+        var terrorist = teams.FirstOrDefault(team => team.TeamNum == (byte)CsTeam.Terrorist);
+        var counterTerrorist = teams.FirstOrDefault(team => team.TeamNum == (byte)CsTeam.CounterTerrorist);
+        if (terrorist == null || counterTerrorist == null)
+        {
+            Console.WriteLine("[BotChat] team score entities are unavailable; taunt skipped");
+            return false;
+        }
+
+        terroristScore = firstHalfOnly ? terrorist.ScoreFirstHalf : terrorist.Score;
+        counterTerroristScore = firstHalfOnly ? counterTerrorist.ScoreFirstHalf : counterTerrorist.Score;
+        return true;
     }
 
     private static bool RollPercent(int chancePercent)
@@ -501,6 +601,9 @@ public class BotChatPlugin : BasePlugin, IPluginConfig<BotChatConfig>
         _startMessages = Uniform(messages.Start);
         _halfTimeMessages = Uniform(messages.HalfTime);
         _matchEndMessages = messages.MatchEnd.Select(entry => (entry.Key.Trim(), entry.Value)).ToArray();
+        _dominantWinTauntMessages = Uniform(messages.Taunts.DominantWin);
+        _halfTimeTauntMessages = Uniform(messages.Taunts.HalfTime);
+        _afterWinTauntMessages = Uniform(messages.Taunts.AfterWin);
         _niceShotMessages = Uniform(messages.NiceShot);
         _headshotMessages = Uniform(messages.Headshot);
         _smokeMessages = Uniform(messages.ThroughSmoke);

@@ -14,6 +14,20 @@ match_end:
   gg ez: 45
   eeeeez: 30
   bot noob: 20
+taunts:
+  dominant_win:
+    - sit
+    - 上强度啊ez
+    - Cry more lol
+  half_time:
+    - ez
+    - 上强度啊
+    - Close your eyes, it'll be over soon.
+  after_win:
+    - 拿了
+    - Mad?
+    - Refound the game ezzzzzz
+    - ez
 nice_shot:
   - 好枪
   - 准啊

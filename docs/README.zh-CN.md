@@ -80,6 +80,15 @@ CS2-Bot-Improver 面向喜欢与人机博弈，或想和朋友一起挑战人机
 台词池与可配置概率。它暴露 `botchat:api` 能力，让可选聊天增强插件共用发言
 仲裁、身份校验和发送路径，而不必内置在 BotChat 中。
 
+`Banter` 是可选增强插件，独立维护 SteamID 恩怨、人格、名场面、复仇和嘲讽
+接龙，以及自己的 `lang/*.yml` 台词池。它可以单独安装或移除，在无法获取
+`botchat:api` 时会保持空闲。
+
+从合并版本升级时，请把旧 BotChat 配置中 `Banter` 对象内部的属性移到
+`configs/plugins/Banter/Banter.json`，并删除旧的 `Banter` 和 `Taunts` 对象。
+部署时只在 `addons/counterstrikesharp/shared/BotChatApi/` 放置一份
+`BotChatApi.dll`，两个插件共用该契约程序集。
+
 BotHider `identity_mode: bot` 仍存在未解决的发送限制：通过 fake-client
 身份发送的消息无法稳定显示。本分支不宣称已经修复该模式；后续需要继续
 排查 BotHider/native fake-client 的发送链路。在需要 BotChat 输出时，请先

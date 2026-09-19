@@ -81,6 +81,17 @@ reactions. It exposes the `botchat:api` capability so optional chat
 enhancements can share speaker arbitration, identity validation, and the
 delivery path without being built into BotChat itself.
 
+`Banter` is an optional enhancement plugin. It owns SteamID-keyed grudges,
+persona behavior, highlight/revenge/taunt chains, and separate `lang/*.yml`
+pools. It can be installed or removed independently and remains idle when
+the `botchat:api` provider is unavailable.
+
+When upgrading from the combined plugin, move the properties inside the old
+BotChat `Banter` object into `configs/plugins/Banter/Banter.json`, then remove
+the old `Banter` and `Taunts` objects. Deploy one `BotChatApi.dll` under
+`addons/counterstrikesharp/shared/BotChatApi/`; both plugins use that shared
+contract assembly.
+
 BotHider `identity_mode: bot` still has an unresolved delivery limitation:
 messages are not reliably visible when sent through the fake-client identity.
 This branch does not claim that mode is fixed; the remaining work belongs in

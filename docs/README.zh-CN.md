@@ -80,10 +80,8 @@ CS2-Bot-Improver 面向喜欢与人机博弈，或想和朋友一起挑战人机
 台词池与可配置概率。它暴露 `botchat:api` 能力，让可选聊天增强插件共用发言
 仲裁、身份校验和发送路径，而不必内置在 BotChat 中。
 
-BotHider `identity_mode: bot` 仍存在未解决的发送限制：通过 fake-client
-身份发送的消息无法稳定显示。本分支不宣称已经修复该模式；后续需要继续
-排查 BotHider/native fake-client 的发送链路。在需要 BotChat 输出时，请先
-使用 `identity_mode: player`。
+身份层是 [CS2-Bot-Identity](https://github.com/xiaoyueyoqwq/CS2-Bot-Identity)
+（`botidentity:api`）。不要加载 BotHider。BotChat 发言过滤仍看引擎 `IsBot`。
 
 ## 命令
 
@@ -236,7 +234,7 @@ negev     m249
 <details>
 <summary><strong>如何手动禁用人机的 Steam 头像和个人资料？</strong></summary>
 
-打开 CS2 安装目录中的 `game/csgo/addons`，将 `BotHider` 文件夹重命名为 `BotHider_disabled`。
+身份层是 CS2-Bot-Identity。若还留着 `addons/BotHider`，把它改名为 `BotHider_disabled`，不要启用。
 
 </details>
 

@@ -81,11 +81,9 @@ reactions. It exposes the `botchat:api` capability so optional chat
 enhancements can share speaker arbitration, identity validation, and the
 delivery path without being built into BotChat itself.
 
-BotHider `identity_mode: bot` still has an unresolved delivery limitation:
-messages are not reliably visible when sent through the fake-client identity.
-This branch does not claim that mode is fixed; the remaining work belongs in
-the BotHider/native fake-client send path. Use `identity_mode: player` when
-BotChat output is required until that path is investigated further.
+Identity is [CS2-Bot-Identity](https://github.com/xiaoyueyoqwq/CS2-Bot-Identity)
+(`botidentity:api`). Do not load BotHider. BotChat still filters speakers
+with the engine `IsBot` flag.
 
 ## Commands
 
@@ -224,7 +222,7 @@ To play with bots again, copy `gameinfo.gi` from `game/csgo/backup/WithBots` int
 <details>
 <summary><strong>How to manually disable bot Steam profiles?</strong></summary>
 
-Navigate to `game/csgo/addons` in your CS2 installation folder and rename `BotHider` folder to `BotHider_disabled`.
+Identity is CS2-Bot-Identity. If a leftover `addons/BotHider` folder is present, rename it to `BotHider_disabled` and do not enable it.
 
 </details>
 

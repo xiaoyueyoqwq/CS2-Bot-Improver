@@ -1,5 +1,5 @@
 **/bin/
 **/obj/
-.gitignore*.zip
-.codex/
 **/libs/
+*.zip
+.codex/

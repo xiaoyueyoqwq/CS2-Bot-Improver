@@ -39,3 +39,32 @@
   submodule PR points at; if declined, maintain it as our own
   ecosystem component like casual-awareness. ed0ard's QQ: 980890875
   (invited in xiaoyueyoqwq/CS2-Bot-Improver PR #1 comments).
+
+# Ecosystem architecture: self-maintained infrastructure vs upstream plugins
+
+## Our infrastructure layer (we own and maintain)
+
+- **RayTrace** (`CS2-RayTraceRemastered`): `raytrace:craytraceinterface`
+  capability — full trace service (TraceOptions/InteractionLayers).
+  Consumers: NadeSystem, BotState. We rewrote it; treat as first-party.
+- **BotIdentity** (`CS2-Bot-Identity`, api18): `botidentity:api` —
+  managed-bot identity (name/steamid disguise, shm bridge). Replaces
+  BotHider entirely (archived). Consumers: VoteImprover, MatchOvertime,
+  CS2-Bot-Manager, CS2-Bot-Buy.
+- **botchat:api**: speaker arbitration + delivery — provider = refactored
+  BotChat (`fork/feat/next`); consumers = Banter (`fork/feat/banter-plugin`),
+  BotBuy drop-lines. Upstream only has the pre-refactor monolith.
+
+## Upstream plugins (sync on breakage, don't fork)
+
+- BotRandomizer, BotAimImprover, BotBuy, NadeSystem, BotAI, BotState,
+  BotController, MultiAddonManager: keep near upstream; our tree is a
+  downstream sync point. When a signature/offset breaks after a game
+  update, first check upstream for the fix before patching ourselves.
+
+## Triage rule for post-update breakage
+
+- Plugin reports "signature resolved to zero" / "Invalid function
+  pointer" → upstream sync first (they usually fix within days).
+- Our infrastructure pieces → we fix ourselves (gamedata/offset updates,
+  KHook ports); nobody else maintains them.

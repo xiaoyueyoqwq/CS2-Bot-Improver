@@ -6,8 +6,6 @@ using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Utils;
 using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
-using CounterStrikeSharp.API.Core.Capabilities;
-using RayTraceAPI;
 using Microsoft.Extensions.Logging;
 
 
@@ -17,8 +15,8 @@ namespace BotAimImprover;
 public class BotAimImprover : BasePlugin
 {
     public override string ModuleName => "BotAimImprover";
-    public override string ModuleVersion => "2.1.3";
-    public override string ModuleAuthor => "ed0ard & htfy96 & XBribo";
+    public override string ModuleVersion => "2.1.8";
+    public override string ModuleAuthor => "ed0ard & htfy96 & XBribo & unicbm";
     public override string ModuleDescription => "Restores intelligent aim part selection for CS2 bots.";
 
     // ============================================================
@@ -83,7 +81,7 @@ public class BotAimImprover : BasePlugin
         16               // FEET
     };
 
-    private static readonly int[] _priorityBody =
+    private static readonly int[] _priorityTrunk =
     {
         4, 5, 3,         // GUT, PELVIS, CHEST,
         10, 11, 6, 7,    // L_GUT, R_GUT, L_CHEST, R_CHEST
@@ -92,46 +90,26 @@ public class BotAimImprover : BasePlugin
         12, 13, 14, 15,  // L_THIGH, R_THIGH, L_SHIN, R_SHIN
         16               // FEET
     };
-    // ============================================================
-    // Platform-specific memory layout (PickNewAimSpot hook + CCSBot fields).
-    //   Linux  libserver.so 2026-05-28
-    //   Windows server.dll  2026-07-09
-    // ============================================================
-    private readonly struct Offsets
+
+    private static readonly int[] _priorityBody =
     {
-        public readonly int TargetSpot;   // Vector(3) m_targetSpot
-        public readonly int Enemy;        // CHandle m_enemy
-        public readonly int IsVisible;    // bool m_isEnemyVisible
-        public readonly int PBot;         // CCSPlayerPawn->m_pBot
-        public readonly string Sig;
-        public Offsets(int ts, int en, int vis, int pbot, string sig)
-        {
-            TargetSpot = ts;
-            Enemy = en;
-            IsVisible = vis;
-            PBot = pbot;
-            Sig = sig;
-        }
-    }
+        4, 5, 10, 11,    // GUT, PELVIS, L_GUT, R_GUT
+        3, 6, 7,         // CHEST, L_CHEST, R_CHEST
+        8, 9,            // L_SHOULDER, R_SHOULDER
+        2, 1, 0,         // JAW, NECK, HEAD        
+        12, 13, 14, 15,  // L_THIGH, R_THIGH, L_SHIN, R_SHIN
+        16               // FEET
+    };
+    // ============================================================
+    // PickNewAimSpot signatures
+    // ============================================================
+    private const string LinuxSignature =
+        "55 48 89 E5 41 55 41 54 53 48 89 FB 48 83 EC 58 8B 8F ? ? 00 00 83 F9 FF";
 
-    private static readonly Offsets LinuxOffsets = new(
-        ts: 0x5974, en: 0x59E0, vis: 0x59E4, pbot: 0x1590,
-        sig: "55 48 89 E5 41 55 41 54 53 48 89 FB 48 83 EC 58 8B 8F E0 59 00 00 83 F9 FF");
-
-    private static readonly Offsets WindowsOffsets = new(
-        ts: 0x599C,
-        en: 0x5A08,
-        vis: 0x5A0C,
-        pbot: 0x12C0,
-        sig: "48 8B C4 55 57 48 8D 68 ? 48 81 EC ? ? ? ? 48 8B F9 0F 29 70 ? 8B 89 ? ? ? ? 83 F9 FF"
-    );
-
-    private Offsets _off;
+    private const string WindowsSignature =
+        "48 8B C4 55 57 48 8D 68 ? 48 81 EC ? ? ? ? 48 8B F9 0F 29 70 ? 8B 89 ? ? ? ? 83 F9 FF";
 
     private MemoryFunctionVoid<IntPtr>? _pickNewAimSpot;
-    private static readonly PluginCapability<CRayTraceInterface> _rayTraceCapability =
-        new("raytrace:craytraceinterface");
-
     // Cache: CCSBot* -> bot's UserId .
     // Cleared on round_start and per-bot on disconnect.
     private readonly ConcurrentDictionary<IntPtr, int> _botToControllerUserId = new();
@@ -160,11 +138,17 @@ public class BotAimImprover : BasePlugin
     public override void Load(bool hotReload)
     {
         bool win = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-        _off = win ? WindowsOffsets : LinuxOffsets;
 
         try
         {
-            _pickNewAimSpot = new MemoryFunctionVoid<IntPtr>(_off.Sig);
+            // Reject missing fields before installing a hook that can write native memory.
+            if (Schema.GetSchemaOffset("CCSPlayerPawn", "m_pBot") <= 0
+                || Schema.GetSchemaOffset("CCSBot", "m_targetSpot") <= 0
+                || Schema.GetSchemaOffset("CCSBot", "m_enemy") <= 0
+                || Schema.GetSchemaOffset("CCSBot", "m_isEnemyVisible") <= 0)
+                throw new InvalidOperationException("Required bot Schema fields are missing.");
+
+            _pickNewAimSpot = new MemoryFunctionVoid<IntPtr>(win ? WindowsSignature : LinuxSignature);
 
             long pnaRuntime = _pickNewAimSpot.Handle.ToInt64();
             if (pnaRuntime == 0)
@@ -177,7 +161,7 @@ public class BotAimImprover : BasePlugin
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "[BotAimImprover] Fatal error during Load() (signature broken?). Plugin inactive.");
+            Logger.LogError(ex, "[BotAimImprover] Fatal error during Load() (signature or Schema unavailable). Plugin inactive.");
             return;
         }
 
@@ -251,21 +235,23 @@ public class BotAimImprover : BasePlugin
             if (pCCSBot == IntPtr.Zero)
                 return HookResult.Continue;
 
+            var bot = new CCSBot(pCCSBot);
+
             // 1) Gate: enemy must be generally visible before we
             //    spend any raytraces. Otherwise the native used last-known position.
-            if (ReadByte(pCCSBot + _off.IsVisible) == 0)
+            if (!bot.IsEnemyVisible)
                 return HookResult.Continue;
 
             // 2) Resolve enemy pawn from m_enemy CHandle.
-            int enemyHandleRaw = ReadInt32(pCCSBot + _off.Enemy);
-            if (enemyHandleRaw == -1)
+            var enemy = bot.Enemy;
+            if (!enemy.IsValid)
                 return HookResult.Continue;
 
-            int enemyIdx = enemyHandleRaw & 0x7FFF;
+            uint enemyIdx = enemy.Index;
             if (enemyIdx <= 0 || enemyIdx >= 4096)
                 return HookResult.Continue;
 
-            CCSPlayerPawn? enemyPawn = Utilities.GetEntityFromIndex<CCSPlayerPawn>(enemyIdx);
+            CCSPlayerPawn? enemyPawn = enemy.Value;
             if (enemyPawn == null || !enemyPawn.IsValid || enemyPawn.Handle == IntPtr.Zero)
                 return HookResult.Continue;
 
@@ -282,9 +268,9 @@ public class BotAimImprover : BasePlugin
             bool isBodyWeapon = wpn != null && _bodyFirstWeapons.Contains(wpn);
             int[] order = _aimMode switch
             {
-                AimMode.HEAD => wpn == "weapon_awp" ? _priorityBody : _priorityHead,
+                AimMode.HEAD => wpn == "weapon_awp" ? _priorityTrunk : _priorityHead,
                 AimMode.BODY => _priorityBody,
-                _ => isBodyWeapon ? _priorityBody : _priorityJaw, // MIXED
+                _ => isBodyWeapon ? _priorityTrunk : _priorityJaw, // MIXED
             };
 
             // 5) Walk the priority order and raytrace each point from the bot's
@@ -305,11 +291,8 @@ public class BotAimImprover : BasePlugin
                 return HookResult.Continue;
 
             // 6) Overwrite only m_targetSpot.xyz.
-            unsafe
-            {
-                float* dst = (float*)(pCCSBot + _off.TargetSpot).ToPointer();
-                dst[0] = rx; dst[1] = ry; dst[2] = rz;
-            }
+            var targetSpot = bot.TargetSpot;
+            targetSpot.X = rx; targetSpot.Y = ry; targetSpot.Z = rz;
 
             // One-time confirmation that the override path actually runs end-to-end.
             if (!_firstOverrideLogged)
@@ -352,7 +335,7 @@ public class BotAimImprover : BasePlugin
                 continue;
 
             IntPtr pBotPtr;
-            try { pBotPtr = ReadIntPtr(pawn.Handle + _off.PBot); }
+            try { pBotPtr = pawn.Bot?.Handle ?? IntPtr.Zero; }
             catch { continue; }
 
             if (pBotPtr == pCCSBot)
@@ -408,25 +391,17 @@ public class BotAimImprover : BasePlugin
                  || float.IsInfinity(x) || float.IsInfinity(y) || float.IsInfinity(z));
     }
 
-    // World-only LoS test from eye to target point. True if unobstructed (>= 0.999).
+    // World-only LoS test from eye to target point, true if unobstructed (>= 0.999)
     private bool PointVisibleFromEye(Vector eye, float tx, float ty, float tz)
     {
         try
         {
-            var rt = _rayTraceCapability.Get();
-            if (rt == null) return true; // RayTrace not loaded -> don't block
             var end = new Vector(tx, ty, tz);
-            var opts = new TraceOptions(InteractionLayers.MASK_WORLD_ONLY);
-            rt.TraceEndShape(eye, end, null, opts, out TraceResult res);
+            var opts = new TraceOptions { InteractsWith = Masks.SolidBrushOnly };
+            var res = Trace.TraceEndShape(eye, end, options: opts);
             return res.Fraction >= 0.999f;
         }
         catch { return true; }
     }
 
-    // ============================================================
-    // Raw memory readers
-    // ============================================================
-    private static unsafe byte ReadByte(IntPtr addr) => *(byte*)addr.ToPointer();
-    private static unsafe int ReadInt32(IntPtr addr) => *(int*)addr.ToPointer();
-    private static unsafe IntPtr ReadIntPtr(IntPtr addr) => *(IntPtr*)addr.ToPointer();
 }

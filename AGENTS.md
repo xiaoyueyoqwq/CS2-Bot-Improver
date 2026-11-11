@@ -61,6 +61,17 @@
   BotController, MultiAddonManager: keep near upstream; our tree is a
   downstream sync point. When a signature/offset breaks after a game
   update, first check upstream for the fix before patching ourselves.
+- The in-tree files under `addons/counterstrikesharp/plugins/` (BotAI,
+  BotState, NadeSystem, BotRandomizer, BotAimImprover, BotBuy) are
+  pre-submodule snapshots — stale, NOT authoritative source. Upstream
+  moved every plugin to a submodule (`.gitmodules` on origin/main):
+  BotAI → ed0ard/CS2-BotAI, BotState → ed0ard/CS2-Smarter-Bot,
+  NadeSystem → ed0ard/CS2-Bot-NadeSystem, BotAimImprover →
+  ed0ard/CS2-Bullseye-Bot, BotRandomizer → ed0ard/CS2-Bot-Randomizer,
+  BotBuy → ed0ard/CS2-Bot-Buy. For audits/builds use those repos plus
+  our forks (CS2-Bot-State, CS2-Bot-NadeSystem), never the in-tree
+  copies. Auditing the stale files produces false signature-death
+  reports (observed 2026-11-11).
 
 ## Triage rule for post-update breakage
 

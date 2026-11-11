@@ -88,15 +88,15 @@ End
 Template SniperPro
 		WeaponPreference = awp
 		WeaponPreference = ak47
-		WeaponPreference = aug
-		WeaponPreference = galilar
-		WeaponPreference = deagle
-		WeaponPreference = m4a1
-		WeaponPreference = sg556
 		WeaponPreference = m4a1_silencer
+		WeaponPreference = m4a1
+		WeaponPreference = galilar
+		WeaponPreference = famas
+		WeaponPreference = aug
+		WeaponPreference = sg556
+		WeaponPreference = deagle
 		WeaponPreference = p90
 		WeaponPreference = mac10
-		WeaponPreference = famas
 		WeaponPreference = ssg08
 		WeaponPreference = tec9
 		WeaponPreference = fiveseven
@@ -104,15 +104,15 @@ End
 
 Template RiflePro
 		WeaponPreference = ak47
+		WeaponPreference = m4a1_silencer
+		WeaponPreference = m4a1
+		WeaponPreference = galilar
+		WeaponPreference = famas
 		WeaponPreference = aug
 		WeaponPreference = sg556
-		WeaponPreference = famas
-		WeaponPreference = galilar
-		WeaponPreference = m4a1_silencer
 		WeaponPreference = deagle
 		WeaponPreference = fiveseven
 		WeaponPreference = tec9
-		WeaponPreference = m4a1
 		WeaponPreference = p90
 		WeaponPreference = mp9
 		WeaponPreference = mac10
@@ -138,14 +138,14 @@ End
 
 Template SniperPure
 		WeaponPreference = awp
-        WeaponPreference = ssg08
         WeaponPreference = ak47
+        WeaponPreference = m4a1_silencer
+        WeaponPreference = m4a1
+        WeaponPreference = ssg08
         WeaponPreference = deagle
         WeaponPreference = fiveseven
         WeaponPreference = tec9
-        WeaponPreference = m4a1
         WeaponPreference = sg556
-        WeaponPreference = m4a1_silencer
         WeaponPreference = p90
         WeaponPreference = mac10
         WeaponPreference = mp9
@@ -155,6 +155,8 @@ End
 
 Template Duelist
 		WeaponPreference = ak47
+		WeaponPreference = m4a1_silencer
+		WeaponPreference = m4a1
 		WeaponPreference = aug
 		WeaponPreference = p90
 		WeaponPreference = tec9
@@ -164,9 +166,7 @@ Template Duelist
 		WeaponPreference = mac10
 		WeaponPreference = mp9
 		WeaponPreference = xm1014
-		WeaponPreference = m4a1_silencer
 		WeaponPreference = sg556
-		WeaponPreference = m4a1
 		WeaponPreference = elite
 End
 
@@ -189,13 +189,13 @@ End
 
 Template Fastshot
 		WeaponPreference = awp
+        WeaponPreference = ak47
+        WeaponPreference = m4a1_silencer
+        WeaponPreference = m4a1
         WeaponPreference = ssg08
         WeaponPreference = deagle
         WeaponPreference = xm1014
         WeaponPreference = nova
-        WeaponPreference = m4a1
-        WeaponPreference = ak47
-        WeaponPreference = m4a1_silencer
         WeaponPreference = sg556
         WeaponPreference = mag7
         WeaponPreference = sawedoff

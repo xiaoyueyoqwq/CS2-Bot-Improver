@@ -2,3 +2,4 @@
 **/obj/
 .gitignore*.zip
 .codex/
+**/libs/

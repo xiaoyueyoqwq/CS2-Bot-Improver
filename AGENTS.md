@@ -23,3 +23,19 @@
   - `Upkeep_BotCOS/SIN_ZeroDrift` pairs with CombatForce spray behavior.
 - If resubmitted upstream, present as preset tiers (casual/normal/hard)
   with verified combinations, not arbitrary toggles.
+
+## BotChat / Banter / botchat:api (self-maintained ecosystem)
+
+- `botchat:api` is live infrastructure: provider = refactored BotChat
+  (feat/next), consumers = Banter (feat/banter-plugin) and BotBuy 2.0.5
+  drop-lines (graceful fallback if absent). Deployed on the server.
+- Authoritative code lives on our fork: `fork/feat/next` (Fimallory's
+  refactor: localized base + api) and `fork/feat/banter-plugin` (adds our
+  Banter plugin). Fimallory/CS2-BotChat contains only the pre-refactor
+  monolith (no api); upstream PR ed0ard/CS2-Bot-Improver#159 would merge
+  that old version.
+- Pending: user contacting author re: adopting the refactored
+  architecture. If accepted, migrate it into the standalone repo the
+  submodule PR points at; if declined, maintain it as our own
+  ecosystem component like casual-awareness. ed0ard's QQ: 980890875
+  (invited in xiaoyueyoqwq/CS2-Bot-Improver PR #1 comments).

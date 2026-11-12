@@ -26,19 +26,22 @@
 
 ## BotChat / Banter / botchat:api (self-maintained ecosystem)
 
-- `botchat:api` is live infrastructure: provider = refactored BotChat
-  (feat/next), consumers = Banter (feat/banter-plugin) and BotBuy 2.0.5
-  drop-lines (graceful fallback if absent). Deployed on the server.
-- Authoritative code lives on our fork: `fork/feat/next` (Fimallory's
-  refactor: localized base + api) and `fork/feat/banter-plugin` (adds our
-  Banter plugin). Fimallory/CS2-BotChat contains only the pre-refactor
-  monolith (no api); upstream PR ed0ard/CS2-Bot-Improver#159 would merge
-  that old version.
-- Pending: user contacting author re: adopting the refactored
-  architecture. If accepted, migrate it into the standalone repo the
-  submodule PR points at; if declined, maintain it as our own
-  ecosystem component like casual-awareness. ed0ard's QQ: 980890875
-  (invited in xiaoyueyoqwq/CS2-Bot-Improver PR #1 comments).
+- `botchat:api` is live infrastructure: provider = refactored BotChat,
+  consumers = Banter and BotBuy 2.0.5 drop-lines (graceful fallback if
+  absent). Deployed on the server.
+- Authoritative repos (2026-11-12 split out, AGPL-3.0):
+  `xiaoyueyoqwq/CS2-BotChat` (plugin + shared/BotChatApi, history
+  extracted from feat/next) and `xiaoyueyoqwq/CS2-Bot-Banter`
+  (libs/BotChatApi.dll HintPath convention). The `feat/next` /
+  `feat/banter-plugin` branches on this fork are now historical
+  references only — do not develop there.
+- Author outcome: contacted 2026-11-11; Fimallory's response was
+  noncommittal (prefers his own hardcoded design, no interest in
+  merging). Route = self-maintained. Fimallory/CS2-BotChat still holds
+  only the pre-refactor monolith; upstream PR
+  ed0ard/CS2-Bot-Improver#159 would merge that old version.
+- Our Banter PR xiaoyueyoqwq/CS2-Bot-Improver#1 remains open draft —
+  left in place in case upstream ever wants the stack.
 
 # Ecosystem architecture: self-maintained infrastructure vs upstream plugins
 
@@ -52,8 +55,9 @@
   BotHider entirely (archived). Consumers: VoteImprover, MatchOvertime,
   CS2-Bot-Manager, CS2-Bot-Buy.
 - **botchat:api**: speaker arbitration + delivery — provider = refactored
-  BotChat (`fork/feat/next`); consumers = Banter (`fork/feat/banter-plugin`),
-  BotBuy drop-lines. Upstream only has the pre-refactor monolith.
+  BotChat (`xiaoyueyoqwq/CS2-BotChat`); consumers = Banter
+  (`xiaoyueyoqwq/CS2-Bot-Banter`), BotBuy drop-lines. Upstream only has
+  the pre-refactor monolith.
 
 ## Upstream plugins (sync on breakage, don't fork)
 
